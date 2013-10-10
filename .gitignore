@@ -1,3 +1,7 @@
+#eclipse
+.cproject
+.project
+
 # Editor backups
 *~
 # libtool temp dir
