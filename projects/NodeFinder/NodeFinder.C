@@ -31,19 +31,16 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
    std::vector<SgNode*> *current_list;
    if(node_map.count(node->variantT()) > 0)
    {
-      current_list = &node_map[node->variantT()];
+      current_list = node_map[node->variantT()];
    } else {
       current_list = new std::vector<SgNode*>();
-      node_map[node->variantT()] = *current_list; // ? memory leak ?
+      node_map[node->variantT()] = current_list;
    }
    current_list->push_back(node);
 
    // create region map for this node
    boost::unordered_map<VariantT, region_info> *current_region_map = new boost::unordered_map<VariantT, region_info>();
-   node_region_map[node] = *current_region_map; // ? memory leak ?
-
-   // store dfs index
-   //dfs_index_map[node] = dfs_index;
+   node_region_map[node] = current_region_map;
 
    // if leaf
    if(node->get_numberOfTraversalSuccessors() == 0)
@@ -56,12 +53,9 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
       return;
    }
 
-   // store the value of dfs_index for the current node
-   //int node_dfs_index = dfs_index;
-
    // create contained types set for this node
    boost::unordered_set<VariantT> *current_contained_types = new boost::unordered_set<VariantT>();
-   node_contained_types[node] = *current_contained_types; // <----- ? is this a memory leak ?
+   node_contained_types[node] = current_contained_types;
 
    // if internal node
    for(int i = 0; i < node->get_numberOfTraversalSuccessors(); i++)
@@ -73,26 +67,26 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
       rebuildIndex_helper(child);
 
       boost::unordered_map<VariantT, region_info> *current_child_region_map;
-      current_child_region_map = &node_region_map[child];
+      current_child_region_map = node_region_map[child];
 
       // bubble up contained types and node info
       current_contained_types->insert(child->variantT());
-      BOOST_FOREACH(VariantT type, node_contained_types[child])
+      BOOST_FOREACH(VariantT type, *(node_contained_types[child]))
       {
-         region_info child_info = (*current_child_region_map)[type];
+         region_info *child_info = &(*current_child_region_map)[type];
          region_info current_info;
          if(current_contained_types->find(type) == current_contained_types->end())
          {
-            current_info.begin_index = child_info.begin_index;
-            current_info.end_index = child_info.end_index;
+            current_info.begin_index = child_info->begin_index;
+            current_info.end_index = child_info->end_index;
             current_contained_types->insert(type);
          } else {
             // merge child region info
-            current_info = node_region_map[node][type];
-            if(child_info.begin_index < current_info.begin_index)
-               current_info.begin_index = child_info.begin_index;
-            if(child_info.end_index > current_info.end_index)
-               current_info.end_index = child_info.end_index;
+            current_info = (*node_region_map[node])[type];
+            if(child_info->begin_index < current_info.begin_index)
+               current_info.begin_index = child_info->begin_index;
+            if(child_info->end_index > current_info.end_index)
+               current_info.end_index = child_info->end_index;
          }
          (*current_region_map)[type] = current_info;
       }
