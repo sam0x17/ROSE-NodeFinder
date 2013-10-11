@@ -5,8 +5,6 @@
 NodeFinder::NodeFinder(SgNode *index_root)
 {
    this->index_root = index_root;
-   //node_map = new boost::unordered_map<VariantT, std::vector<SgNode*>>();
-   //node_region_map = new boost::unordered_map<SgNode*, boost::unordered_map<VariantT, region_info>>();
    rebuildIndex(index_root);
 }
 
@@ -17,21 +15,35 @@ void NodeFinder::rebuildIndex()
    rebuildIndex(index_root);
 }
 
-void NodeFinder::rebuildIndex_helper(SgNode *node, int dfs_index)
+void NodeFinder::rebuildIndex(SgNode *index_root)
 {
+   this->index_root = index_root;
+   node_region_map.clear();
+   node_map.clear();
+   rebuildIndex_helper(index_root);
+   node_contained_types.clear(); // don't need node_contained_types to perform searches
+}
+
+void NodeFinder::rebuildIndex_helper(SgNode *node)
+{
+   ROSE_ASSERT(node != NULL);
    // add node to the corresponding vector
-   std::vector<SgNode*> *current_list = &node_map[node->variantT()];
-   if(current_list == NULL)
+   std::vector<SgNode*> *current_list;
+   if(node_map.count(node->variantT()) > 0)
    {
-      current_list = &std::vector<SgNode*>();
-      node_map[node->variantT()] = *current_list; // ? do we want to dereference this ?
+      current_list = &node_map[node->variantT()];
+   } else {
+      current_list = new std::vector<SgNode*>();
+      node_map[node->variantT()] = *current_list; // ? memory leak ?
    }
    current_list->push_back(node);
 
-   // get reference to proper region map
-   boost::unordered_map<VariantT, region_info> current_region_map;
-   node_region_map[node] = current_region_map; // ? do we want to dereference this ?
+   // create region map for this node
+   boost::unordered_map<VariantT, region_info> *current_region_map = new boost::unordered_map<VariantT, region_info>();
+   node_region_map[node] = *current_region_map; // ? memory leak ?
 
+   // store dfs index
+   //dfs_index_map[node] = dfs_index;
 
    // if leaf
    if(node->get_numberOfTraversalSuccessors() == 0)
@@ -40,60 +52,51 @@ void NodeFinder::rebuildIndex_helper(SgNode *node, int dfs_index)
       region_info info;
       info.begin_index = current_list->size() - 1;
       info.end_index = info.begin_index + 1;
-      current_region_map[node->variantT()] = info;
+      (*current_region_map)[node->variantT()] = info;
       return;
    }
+
+   // store the value of dfs_index for the current node
+   //int node_dfs_index = dfs_index;
+
+   // create contained types set for this node
+   boost::unordered_set<VariantT> *current_contained_types = new boost::unordered_set<VariantT>();
+   node_contained_types[node] = *current_contained_types; // <----- ? is this a memory leak ?
 
    // if internal node
    for(int i = 0; i < node->get_numberOfTraversalSuccessors(); i++)
    {
       // traverse children
       SgNode *child = node->get_traversalSuccessorByIndex(i);
-      rebuildIndex_helper(child, ++dfs_index);
-   }
-}
 
-/*
-stack.push(root)
-while !stack.isEmpty() do
-    node = stack.pop()
-    for each node.childNodes do
-        stack.push(stack)
-    endfor
-    // …
-endwhile
- */
-void NodeFinder::rebuildIndex(SgNode *index_root)
-{
-   /*
-   this->index_root = index_root;
+      //rebuildIndex_helper(child, ++dfs_index); // RECURSIVE CALL
+      rebuildIndex_helper(child);
 
-   std::stack<SgNode*> node_stack;
-   boost::unordered_map<VariantT, std::stack<int>> region_start_stacks;
+      boost::unordered_map<VariantT, region_info> *current_child_region_map;
+      current_child_region_map = &node_region_map[child];
 
-   // perform depth first search of AST starting at index_root
-   node_stack.push(index_root);
-
-   while(!node_stack.empty())
-   {
-      SgNode *node = node_stack.pop();
-      std::vector<SgNode*> *current_list = node_map[node->variantT()];
-      if(current_list == NULL)
+      // bubble up contained types and node info
+      current_contained_types->insert(child->variantT());
+      BOOST_FOREACH(VariantT type, node_contained_types[child])
       {
-         current_list = new std::vector<SgNode*>();
-         node_map[node->variantT()] = current_list;
+         region_info child_info = (*current_child_region_map)[type];
+         region_info current_info;
+         if(current_contained_types->find(type) == current_contained_types->end())
+         {
+            current_info.begin_index = child_info.begin_index;
+            current_info.end_index = child_info.end_index;
+            current_contained_types->insert(type);
+         } else {
+            // merge child region info
+            current_info = node_region_map[node][type];
+            if(child_info.begin_index < current_info.begin_index)
+               current_info.begin_index = child_info.begin_index;
+            if(child_info.end_index > current_info.end_index)
+               current_info.end_index = child_info.end_index;
+         }
+         (*current_region_map)[type] = current_info;
       }
-      current_list->push_back(node);
-
-      for(int i = 0; i < node->get_numberOfTraversalSuccessors(); i++)
-      {
-         SgNode *child = node->get_traversalSuccessorByIndex(i);
-         node_stack.push(child);
-
-      }
-
    }
-   */
 }
 
 int main()
