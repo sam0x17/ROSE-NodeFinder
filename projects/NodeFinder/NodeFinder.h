@@ -21,7 +21,7 @@ class NodeFinder
       std::vector<SgNode*> find(SgNode *search_root, VariantT search_type);
 
    private:
-      void rebuildIndex_helper(SgNode *node);
+      void rebuildIndex_helper(SgNode *node, int depth);
       struct region_info
       {
          int begin_index; // inclusive

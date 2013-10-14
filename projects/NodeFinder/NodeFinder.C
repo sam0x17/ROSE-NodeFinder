@@ -17,16 +17,21 @@ void NodeFinder::rebuildIndex()
 
 void NodeFinder::rebuildIndex(SgNode *index_root)
 {
+   std::cout << "Traversing AST and generating data structures..." << std::endl;
    this->index_root = index_root;
    node_region_map.clear();
    node_map.clear();
-   rebuildIndex_helper(index_root);
+   rebuildIndex_helper(index_root, 0);
    node_contained_types.clear(); // don't need node_contained_types to perform searches
 }
 
-void NodeFinder::rebuildIndex_helper(SgNode *node)
+void NodeFinder::rebuildIndex_helper(SgNode *node, int depth)
 {
    ROSE_ASSERT(node != NULL);
+
+   /*for(int i = 0; i < depth; i++) std::cout << "\t";
+   std::cout << node->sage_class_name() << std::endl;*/
+
    // add node to the corresponding vector
    std::vector<SgNode*> *current_list;
    if(node_map.count(node->variantT()) > 0)
@@ -62,15 +67,25 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
    {
       // traverse children
       SgNode *child = node->get_traversalSuccessorByIndex(i);
+      if(child == NULL)
+      {
+         continue;
+      }
 
-      //rebuildIndex_helper(child, ++dfs_index); // RECURSIVE CALL
-      rebuildIndex_helper(child);
+      // recursive call
+      rebuildIndex_helper(child, depth + 1);
 
       boost::unordered_map<VariantT, region_info> *current_child_region_map;
       current_child_region_map = node_region_map[child];
 
       // bubble up contained types and node info
       current_contained_types->insert(child->variantT());
+      if(node_contained_types.find(child) == node_contained_types.end())
+      {
+         //std::cout << "ATTEMPTING TO FIX PROBLEMATIC NODE!" << std::endl;
+         rebuildIndex_helper(child, depth + 1);
+         continue;
+      }
       BOOST_FOREACH(VariantT type, *(node_contained_types[child]))
       {
          region_info *child_info = &(*current_child_region_map)[type];
@@ -93,8 +108,14 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
    }
 }
 
-int main()
+int main(int argc, char** argv)
 {
-   NodeFinder nf(NULL);
-   std::cout << "yo" << std::endl;
+   std::cout << "Loading AST into ROSE..." << std::endl;
+   // load specified source file(s) into ROSE and get the root SgNode
+   SgProject *project = frontend(argc, argv);
+   SgNode *root_node = (SgNode*)project;
+
+   std::cout << "Initializing NodeFinder..." << std::endl;
+   NodeFinder finder(root_node);
+   std::cout << "Done." << std::endl;
 }
