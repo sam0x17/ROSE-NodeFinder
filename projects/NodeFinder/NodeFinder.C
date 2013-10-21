@@ -1,6 +1,10 @@
+/*
+ * NodeFinder.C
+ *
+ *  Created on: Oct 8, 2013
+ *      Author: Sam Kelly <kellys@dickinson.edu>
+ */
 #include <NodeFinder.h>
-
-
 
 NodeFinder::NodeFinder(SgNode *index_root)
 {
@@ -8,7 +12,16 @@ NodeFinder::NodeFinder(SgNode *index_root)
    rebuildIndex(index_root);
 }
 
-NodeFinder::~NodeFinder(){}
+//TODO: fix the type problem
+NodeFinderResult NodeFinder::find(SgNode *search_root, VariantT search_type)
+{
+   ROSE_ASSERT(search_root != NULL);
+   ROSE_ASSERT(node_map.find(search_type) != node_map.end());
+   region_info *info = &(*node_region_map[search_root])[search_type];
+   int end_index = info->end_index - 1;
+   if(end_index < 0) end_index = 0;
+   return NodeFinderResult(node_map[search_type], info->begin_index, end_index);
+}
 
 void NodeFinder::rebuildIndex()
 {
@@ -21,16 +34,16 @@ void NodeFinder::rebuildIndex(SgNode *index_root)
    this->index_root = index_root;
    node_region_map.clear();
    node_map.clear();
-   rebuildIndex_helper(index_root, 0);
+   rebuildIndex_helper(index_root);
    node_contained_types.clear(); // don't need node_contained_types to perform searches
+
 }
 
-void NodeFinder::rebuildIndex_helper(SgNode *node, int depth)
+void NodeFinder::rebuildIndex_helper(SgNode *node)
 {
    ROSE_ASSERT(node != NULL);
-
-   /*for(int i = 0; i < depth; i++) std::cout << "\t";
-   std::cout << node->sage_class_name() << std::endl;*/
+   //for(int i = 0; i < depth; i++) std::cout << "\t";
+   //std::cout << node->sage_class_name() << std::endl;
 
    // add node to the corresponding vector
    std::vector<SgNode*> *current_list;
@@ -43,24 +56,23 @@ void NodeFinder::rebuildIndex_helper(SgNode *node, int depth)
    }
    current_list->push_back(node);
 
-   // create region map for this node
-   boost::unordered_map<VariantT, region_info> *current_region_map = new boost::unordered_map<VariantT, region_info>();
+   // setup region map for this node
+   boost::unordered_map<VariantT, region_info> *current_region_map;
+   //all_nodes.push_back(node);
+   current_region_map = new boost::unordered_map<VariantT, region_info>();
    node_region_map[node] = current_region_map;
-
-   // if leaf
-   if(node->get_numberOfTraversalSuccessors() == 0)
-   {
-      // create region info
-      region_info info;
-      info.begin_index = current_list->size() - 1;
-      info.end_index = info.begin_index + 1;
-      (*current_region_map)[node->variantT()] = info;
-      return;
-   }
 
    // create contained types set for this node
    boost::unordered_set<VariantT> *current_contained_types = new boost::unordered_set<VariantT>();
    node_contained_types[node] = current_contained_types;
+
+   region_info info;
+   info.begin_index = current_list->size() - 1;
+   info.end_index = info.begin_index + 1;
+   (*current_region_map)[node->variantT()] = info;
+   current_contained_types->insert(node->variantT());
+   region_info *current_info = &(*current_region_map)[node->variantT()];
+   current_info->end_index++;
 
    // if internal node
    for(int i = 0; i < node->get_numberOfTraversalSuccessors(); i++)
@@ -73,23 +85,17 @@ void NodeFinder::rebuildIndex_helper(SgNode *node, int depth)
       }
 
       // recursive call
-      rebuildIndex_helper(child, depth + 1);
-
+      rebuildIndex_helper(child);
       boost::unordered_map<VariantT, region_info> *current_child_region_map;
       current_child_region_map = node_region_map[child];
 
       // bubble up contained types and node info
       current_contained_types->insert(child->variantT());
-      if(node_contained_types.find(child) == node_contained_types.end())
-      {
-         //std::cout << "ATTEMPTING TO FIX PROBLEMATIC NODE!" << std::endl;
-         rebuildIndex_helper(child, depth + 1);
-         continue;
-      }
       BOOST_FOREACH(VariantT type, *(node_contained_types[child]))
       {
          region_info *child_info = &(*current_child_region_map)[type];
          region_info current_info;
+
          if(current_contained_types->find(type) == current_contained_types->end())
          {
             current_info.begin_index = child_info->begin_index;
@@ -98,14 +104,22 @@ void NodeFinder::rebuildIndex_helper(SgNode *node, int depth)
          } else {
             // merge child region info
             current_info = (*node_region_map[node])[type];
-            if(child_info->begin_index < current_info.begin_index)
-               current_info.begin_index = child_info->begin_index;
-            if(child_info->end_index > current_info.end_index)
-               current_info.end_index = child_info->end_index;
+
+            if(current_info.begin_index == current_info.end_index)
+            {
+               current_info = *child_info;
+            } else {
+               if(child_info->begin_index < current_info.begin_index)
+                  current_info.begin_index = child_info->begin_index;
+               if(child_info->end_index > current_info.end_index)
+                  current_info.end_index = child_info->end_index;
+               //std::cout << "merging: (" << current_info.begin_index << ", " << current_info.end_index << ") + (" << child_info->begin_index << ", " << child_info->end_index << ") = (" << current_info.begin_index << ", " << current_info.end_index << ")" << std::endl;
+            }
          }
          (*current_region_map)[type] = current_info;
       }
    }
+
 }
 
 int main(int argc, char** argv)
@@ -117,5 +131,21 @@ int main(int argc, char** argv)
 
    std::cout << "Initializing NodeFinder..." << std::endl;
    NodeFinder finder(root_node);
-   std::cout << "Done." << std::endl;
+   std::cout << "Done initializing." << std::endl;
+
+   VariantT node_type = V_SgVarRefExp;
+
+   NodeFinderResult res1 = finder.find(root_node, V_SgReturnStmt);
+   NodeFinderResult res2 = finder.find(res1[1], node_type);
+
+   std::cout << "first search size: " << res1.size() << std::endl;
+   for(int i = 0; i < res1.size(); i++)
+   {
+      std::cout << "result #" << i + 1 << ":" << res1[i] << " " << res1[i]->sage_class_name() << std::endl;
+   }
+   std::cout << "second search size: " << res2.size() << std::endl;
+   for(int i = 0; i < res2.size(); i++)
+   {
+      std::cout << "result #" << i + 1 << ":" << res2[i] << " " << res2[i]->sage_class_name() << std::endl;
+   }
 }

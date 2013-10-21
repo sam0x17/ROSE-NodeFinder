@@ -12,7 +12,7 @@ CLEAN_TARGETS =
 
 #------------------------------------------------------------------------------------------------------------------------
 # Header files, etc
-EXTRA_DIST += NodeFinder.h
+EXTRA_DIST += NodeFinder.h NodeFinderResult.h
 
 #------------------------------------------------------------------------------------------------------------------------
 # Specimens, test inputs
@@ -22,8 +22,8 @@ EXTRA_DIST += $(SPECIMENS)
 #------------------------------------------------------------------------------------------------------------------------
 # NodeFinder (using "fsm_" as a unique test prefix)
 bin_PROGRAMS += NodeFinder
-NodeFinder_SOURCES = NodeFinder.C
-NodeFinder_CPPFLAGS = $(ROSE_INCLUDES) -std=c++0x
+NodeFinder_SOURCES = NodeFinderResult.C NodeFinder.C
+NodeFinder_CPPFLAGS = $(ROSE_INCLUDES)
 NodeFinder_LDADD = $(LIBS_WITH_RPATH) $(ROSE_LIBS)
 
 #------------------------------------------------------------------------------------------------------------------------
