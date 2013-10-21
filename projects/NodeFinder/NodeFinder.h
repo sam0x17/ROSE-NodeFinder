@@ -29,14 +29,6 @@ class NodeFinder
       {
          int begin_index; // inclusive
          int end_index; // exclusive
-         bool operator!=(const region_info& RHS)
-         {
-            return begin_index != RHS.begin_index || end_index != RHS.end_index;
-         }
-         bool operator==(const region_info& RHS)
-         {
-            return begin_index == RHS.begin_index && end_index == RHS.end_index;
-         }
       };
    private:
       void rebuildIndex_helper(SgNode *node);

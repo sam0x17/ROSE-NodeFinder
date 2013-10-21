@@ -12,7 +12,6 @@ NodeFinder::NodeFinder(SgNode *index_root)
    rebuildIndex(index_root);
 }
 
-//TODO: fix the type problem
 NodeFinderResult NodeFinder::find(SgNode *search_root, VariantT search_type)
 {
    ROSE_ASSERT(search_root != NULL);
@@ -148,4 +147,16 @@ int main(int argc, char** argv)
    {
       std::cout << "result #" << i + 1 << ":" << res2[i] << " " << res2[i]->sage_class_name() << std::endl;
    }
+   BOOST_FOREACH(SgNode *node, res2)
+   {
+      std::cout << node->sage_class_name() << std::endl;
+   }
+
+   // test blank results -- using pointer to res2 because we need something non null
+   NodeFinderResult blank = NodeFinderResult((std::vector<SgNode*> *)(&res2), 0, 0);
+   BOOST_FOREACH(SgNode *node, blank)
+   {
+      std::cout << "shouldn't see this" << std::endl;
+   }
+   std::cout << "NodeFinder tests done." << std::endl;
 }

@@ -11,6 +11,7 @@ NodeFinderResult::NodeFinderResult(std::vector<SgNode*> *nodes, int begin_index,
    ROSE_ASSERT(begin_index >= 0);
    ROSE_ASSERT(end_index >= 0);
    ROSE_ASSERT(end_index >= begin_index);
+   ROSE_ASSERT(nodes != NULL);
    //std::cout << "RESULT_CREATED: " << begin_index << ", " << end_index << std::endl;
    this->nodes = nodes;
    this->begin_index = begin_index;

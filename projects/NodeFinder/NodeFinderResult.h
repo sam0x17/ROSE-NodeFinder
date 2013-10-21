@@ -21,6 +21,10 @@ class NodeFinderResult
       SgNode* operator [](int index);
       SgNode* get(int index);
       int size();
+      typedef SgNode **iterator;
+      typedef const SgNode **const_iterator;
+      iterator begin() { return &(*nodes)[begin_index]; }
+      iterator end() { return &(*nodes)[end_index]; }
    private:
       std::vector<SgNode*> *nodes;
       int begin_index;
