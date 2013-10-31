@@ -11,10 +11,11 @@ NodeFinderResult::NodeFinderResult(std::vector<SgNode*> *nodes, int begin_index,
    ROSE_ASSERT(begin_index >= 0);
    ROSE_ASSERT(end_index >= 0);
    ROSE_ASSERT(end_index >= begin_index);
-   ROSE_ASSERT(nodes != NULL);
    this->nodes = nodes;
    this->begin_index = begin_index;
    this->end_index = end_index;
+   std::cout << "size: " << size() << std::endl;
+   //ROSE_ASSERT(nodes != NULL || size() == 0);
 }
 
 int NodeFinderResult::size()
@@ -26,6 +27,7 @@ SgNode* NodeFinderResult::operator [](int index)
 {
    ROSE_ASSERT(index >= 0);
    ROSE_ASSERT(index < size());
+   ROSE_ASSERT(nodes != NULL);
    return (*nodes)[begin_index + index];
 }
 
