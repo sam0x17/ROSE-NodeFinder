@@ -5,6 +5,7 @@
  *      Author: Sam Kelly <kellys@dickinson.edu>
  */
 #include <NodeFinder.h>
+#include <AstMatching.h>
 
 NodeFinder::NodeFinder(SgNode *index_root)
 {
@@ -29,8 +30,8 @@ NodeFinderResult NodeFinder::find(SgNode *search_root, VariantT search_type)
       end_index = info->end_index - 1;
       if(end_index < 0) end_index = 0;
    }
-   std::cout << "begin index: " << begin_index << std::endl;
-   std::cout << "end index: " << end_index << std::endl;
+   //std::cout << "begin index: " << begin_index << std::endl;
+   //std::cout << "end index: " << end_index << std::endl;
    return NodeFinderResult(node_map[search_type], begin_index, end_index);
 }
 
@@ -41,7 +42,7 @@ void NodeFinder::rebuildIndex()
 
 void NodeFinder::rebuildIndex(SgNode *index_root)
 {
-   std::cout << "Traversing AST and generating data structures..." << std::endl;
+   //std::cout << "Traversing AST and generating data structures..." << std::endl;
    this->index_root = index_root;
    node_region_map.clear();
    node_map.clear();
@@ -53,8 +54,6 @@ void NodeFinder::rebuildIndex(SgNode *index_root)
 void NodeFinder::rebuildIndex_helper(SgNode *node)
 {
    ROSE_ASSERT(node != NULL);
-   //for(int i = 0; i < depth; i++) std::cout << "\t";
-   //std::cout << node->sage_class_name() << std::endl;
 
    // add node to the corresponding vector
    std::vector<SgNode*> *current_list;
@@ -69,7 +68,6 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
 
    // setup region map for this node
    boost::unordered_map<VariantT, region_info> *current_region_map;
-   //all_nodes.push_back(node);
    current_region_map = new boost::unordered_map<VariantT, region_info>();
    node_region_map[node] = current_region_map;
 
@@ -85,15 +83,11 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
    region_info *current_info = &(*current_region_map)[node->variantT()];
    current_info->end_index++;
 
-   // if internal node
+   // traverse children
    for(int i = 0; i < node->get_numberOfTraversalSuccessors(); i++)
    {
-      // traverse children
       SgNode *child = node->get_traversalSuccessorByIndex(i);
-      if(child == NULL)
-      {
-         continue;
-      }
+      if(child == NULL) continue;
 
       // recursive call
       rebuildIndex_helper(child);
@@ -118,7 +112,6 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
 
             if(current_info.begin_index == current_info.end_index)
             {
-               //std::cout << "it happened" << std::endl;
                current_info = *child_info;
             } else {
                if(child_info->begin_index < current_info.begin_index)
@@ -141,35 +134,126 @@ int main(int argc, char** argv)
    SgProject *project = frontend(argc, argv);
    SgNode *root_node = (SgNode*)project;
 
-   std::cout << "Initializing NodeFinder..." << std::endl;
-   NodeFinder finder(root_node);
-   std::cout << "Done initializing." << std::endl;
+   NodeFinder finder = NodeFinder(root_node);
 
-   VariantT node_type = V_SgVarRefExp;
 
-   NodeFinderResult res1 = finder.find(root_node, V_SgReturnStmt);
-   NodeFinderResult res2 = finder.find(res1[1], node_type);
+   // test normal nested complex results
 
-   std::cout << "first search size: " << res1.size() << std::endl;
-   for(int i = 0; i < res1.size(); i++)
-   {
-      std::cout << "result #" << i + 1 << ":" << res1[i] << " " << res1[i]->sage_class_name() << std::endl;
-   }
-   std::cout << "second search size: " << res2.size() << std::endl;
-   for(int i = 0; i < res2.size(); i++)
-   {
-      std::cout << "result #" << i + 1 << ":" << res2[i] << " " << res2[i]->sage_class_name() << std::endl;
-   }
-   BOOST_FOREACH(SgNode *node, res2)
-   {
-      std::cout << node->sage_class_name() << std::endl;
-   }
+   NodeFinderResult var_dec_res_1 = finder.find(root_node, V_SgVariableDeclaration);
+   ROSE_ASSERT(var_dec_res_1.size() == 16);
 
-   /*// test blank results -- using pointer to res2 because we need something non null
-   NodeFinderResult blank = NodeFinderResult((std::vector<SgNode*> *)(&res1), 0, 0);
-   BOOST_FOREACH(SgNode *node, blank)
-   {
-      std::cout << "shouldn't see this" << std::endl;
-   }
-   std::cout << "NodeFinder tests done." << std::endl;*/
+   NodeFinderResult if_res_1 = finder.find(root_node, V_SgIfStmt);
+   ROSE_ASSERT(if_res_1.size() == 16);
+
+   NodeFinderResult for_res_1 = finder.find(root_node, V_SgForStatement);
+   ROSE_ASSERT(for_res_1.size() == 4);
+
+
+   root_node = if_res_1[0];
+
+   NodeFinderResult var_dec_res_2 = finder.find(root_node, V_SgVariableDeclaration);
+   ROSE_ASSERT(var_dec_res_2.size() == 15);
+
+   NodeFinderResult if_res_2 = finder.find(root_node, V_SgIfStmt);
+   ROSE_ASSERT(if_res_2.size() == 15);
+
+   NodeFinderResult for_res_2 = finder.find(root_node, V_SgForStatement);
+   ROSE_ASSERT(for_res_2.size() == 4);
+
+
+   root_node = if_res_2[0];
+
+   NodeFinderResult var_dec_res_3 = finder.find(root_node, V_SgVariableDeclaration);
+   ROSE_ASSERT(var_dec_res_3.size() == 14);
+
+   NodeFinderResult if_res_3 = finder.find(root_node, V_SgVariableDeclaration);
+   ROSE_ASSERT(if_res_3.size() == 14);
+
+   NodeFinderResult for_res_3 = finder.find(root_node, V_SgForStatement);
+   ROSE_ASSERT(for_res_3.size() == 4);
+
+
+   root_node = if_res_1[4];
+
+   NodeFinderResult if_res_4 = finder.find(root_node, V_SgIfStmt);
+   ROSE_ASSERT(if_res_4.size() == 11);
+
+   NodeFinderResult var_dec_res_4 = finder.find(root_node, V_SgVariableDeclaration);
+   ROSE_ASSERT(var_dec_res_4.size() == 11);
+
+   NodeFinderResult for_res_4 = finder.find(root_node, V_SgForStatement);
+   ROSE_ASSERT(for_res_4.size() == 4);
+
+
+   root_node = if_res_4[0];
+
+   NodeFinderResult if_res_5 = finder.find(root_node, V_SgIfStmt);
+   ROSE_ASSERT(if_res_5.size() == 10);
+
+   NodeFinderResult var_dec_res_5 = finder.find(root_node, V_SgVariableDeclaration);
+   ROSE_ASSERT(var_dec_res_5.size() == 9);
+
+
+   root_node = if_res_5[0];
+
+   NodeFinderResult if_res_6 = finder.find(root_node, V_SgIfStmt);
+   ROSE_ASSERT(if_res_6.size() == 8);
+
+   NodeFinderResult var_dec_res_6 = finder.find(root_node, V_SgVariableDeclaration);
+   ROSE_ASSERT(var_dec_res_6.size() == 9);
+
+   NodeFinderResult for_res_5 = finder.find(root_node, V_SgForStatement);
+   ROSE_ASSERT(for_res_5.size() == 4);
+
+
+   root_node = for_res_5[0];
+
+   NodeFinderResult if_res_7 = finder.find(root_node, V_SgIfStmt);
+   ROSE_ASSERT(if_res_7.size() == 7);
+
+   NodeFinderResult var_dec_res_7 = finder.find(root_node, V_SgVariableDeclaration);
+   ROSE_ASSERT(var_dec_res_7.size() == 9);
+
+   NodeFinderResult for_res_6 = finder.find(root_node, V_SgForStatement);
+   ROSE_ASSERT(for_res_6.size() == 3);
+
+
+   root_node = for_res_6[0];
+
+   NodeFinderResult for_res_7 = finder.find(root_node, V_SgForStatement);
+   ROSE_ASSERT(for_res_7.size() == 2);
+
+   NodeFinderResult var_dec_res_8 = finder.find(root_node, V_SgVariableDeclaration);
+   ROSE_ASSERT(var_dec_res_8.size() == 8);
+
+   NodeFinderResult if_res_8 = finder.find(root_node, V_SgIfStmt);
+   ROSE_ASSERT(if_res_8.size() == 6);
+
+
+   root_node = for_res_7[1];
+
+   NodeFinderResult for_res_8 = finder.find(root_node, V_SgForStatement);
+   ROSE_ASSERT(for_res_8.size() == 0);
+
+   NodeFinderResult var_dec_res_9 = finder.find(root_node, V_SgVariableDeclaration);
+   ROSE_ASSERT(var_dec_res_9.size() == 4);
+
+   NodeFinderResult if_res_9 = finder.find(root_node, V_SgIfStmt);
+   ROSE_ASSERT(if_res_9.size() == 4);
+
+
+   // test empty results
+
+   NodeFinderResult var_dec_res_10 = finder.find(var_dec_res_9[0], V_SgVariableDeclaration);
+   ROSE_ASSERT(var_dec_res_10.size() == 0);
+
+   NodeFinderResult namespace_res = finder.find(if_res_1[0], V_SgNamespaceDeclarationStatement);
+   ROSE_ASSERT(namespace_res.size() == 0);
+
+   std::cout << "All NodeFinder tests have passed!" << std::endl;
+
+   root_node = (SgNode*)project;
+   AstMatching matcher;
+   MatchResult matching_res = matcher.performMatching("$f=SgVariableDeclaration", root_node);
+
 }

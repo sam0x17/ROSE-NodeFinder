@@ -21,6 +21,11 @@ EXTRA_DIST += $(SPECIMENS)
 
 #------------------------------------------------------------------------------------------------------------------------
 # NodeFinder (using "fsm_" as a unique test prefix)
+#noinst_LIBRARIES = libnodefinder.a
+#libnodefinder_a_SOURCES = NodeFinderResult.C NodeFinder.C
+#libnodefinder_a_CPPFLAGS = $(ROSE_INCLUDES)
+#libnodefinder_a_LIBADD = $(LIBS_WITH_RPATH) $(ROSE_LIBS)
+# NodeFinder (using "fsm_" as a unique test prefix)
 bin_PROGRAMS += NodeFinder
 NodeFinder_SOURCES = NodeFinderResult.C NodeFinder.C
 NodeFinder_CPPFLAGS = $(ROSE_INCLUDES)
