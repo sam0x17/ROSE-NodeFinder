@@ -32,6 +32,12 @@ NodeFinderTest_SOURCES = NodeFinderTest.C
 NodeFinderTest_CPPFLAGS = $(ROSE_INCLUDES)
 NodeFinderTest_LDADD = $(LIBS_WITH_RPATH) $(ROSE_LIBS) libnodefinder.a
 #------------------------------------------------------------------------------------------------------------------------
+# NodeFinder Benchmark
+noinst_PROGRAMS += NodeFinderBenchmark
+NodeFinderBenchmark_SOURCES = NodeFinderBenchmark.C
+NodeFinderBenchmark_CPPFLAGS = $(ROSE_INCLUDES)
+NodeFinderBenchmark_LDADD = $(LIBS_WITH_RPATH) $(ROSE_LIBS) libnodefinder.a
+#------------------------------------------------------------------------------------------------------------------------
 # automake check and clean rules
 check-local: $(CHECK_TARGETS)
 	make test
@@ -41,5 +47,7 @@ clean: $(CLEAN_TARGETS)
 	rm -f $(MOSTLYCLEANFILES)
 test:
 	./NodeFinderTest --edg:no_warnings $(srcdir)/test_sample.C
-
+benchmark:
+	@echo "Nodefinder Benchmark: Running benchmark using default sample C++ file (nested for loops with variable declarations)"
+	./NodeFinderBenchmark --edg:no_warnings $(srcdir)/benchmark_sample.C
 endif
