@@ -14,8 +14,6 @@ NodeFinderResult::NodeFinderResult(std::vector<SgNode*> *nodes, int begin_index,
    this->nodes = nodes;
    this->begin_index = begin_index;
    this->end_index = end_index;
-   //std::cout << "size: " << size() << std::endl;
-   //ROSE_ASSERT(nodes != NULL || size() == 0);
 }
 
 int NodeFinderResult::size()

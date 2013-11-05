@@ -60,6 +60,10 @@ class NodeFinder
       boost::unordered_map<SgNode*, boost::unordered_map<VariantT, region_info>*> node_region_map;
       boost::unordered_map<SgNode*, boost::unordered_set<VariantT>*> node_contained_types;
       boost::unordered_map<VariantT, std::vector<SgNode*>*> node_map;
+
+      std::vector<boost::unordered_map<VariantT, region_info>*> node_region_map_allocations;
+      std::vector<boost::unordered_set<VariantT>*> node_contained_types_allocations;
+      std::vector<std::vector<SgNode*>*> node_map_allocations;
 };
 
 #endif

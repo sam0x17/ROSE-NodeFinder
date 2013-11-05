@@ -41,13 +41,17 @@ void NodeFinder::rebuildIndex()
 
 void NodeFinder::rebuildIndex(SgNode *index_root)
 {
-   //std::cout << "Traversing AST and generating data structures..." << std::endl;
    this->index_root = index_root;
    node_region_map.clear();
    node_map.clear();
+   for(uint i = 0; i < node_region_map_allocations.size(); i++) delete node_region_map_allocations[i];
+   for(uint i = 0; i < node_map_allocations.size(); i++) delete node_map_allocations[i];
+   node_region_map_allocations.clear();
+   node_map_allocations.clear();
    rebuildIndex_helper(index_root);
    node_contained_types.clear(); // don't need node_contained_types to perform searches
-
+   for(uint i = 0; i < node_contained_types_allocations.size(); i++) delete node_contained_types_allocations[i];
+   node_contained_types_allocations.clear();
 }
 
 void NodeFinder::rebuildIndex_helper(SgNode *node)
@@ -61,6 +65,7 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
       current_list = node_map[node->variantT()];
    } else {
       current_list = new std::vector<SgNode*>();
+      node_map_allocations.push_back(current_list);
       node_map[node->variantT()] = current_list;
    }
    current_list->push_back(node);
@@ -68,10 +73,12 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
    // setup region map for this node
    boost::unordered_map<VariantT, region_info> *current_region_map;
    current_region_map = new boost::unordered_map<VariantT, region_info>();
+   node_region_map_allocations.push_back(current_region_map);
    node_region_map[node] = current_region_map;
 
    // create contained types set for this node
    boost::unordered_set<VariantT> *current_contained_types = new boost::unordered_set<VariantT>();
+   node_contained_types_allocations.push_back(current_contained_types);
    node_contained_types[node] = current_contained_types;
 
    region_info info;
@@ -83,7 +90,7 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
    current_info->end_index++;
 
    // traverse children
-   for(int i = 0; i < node->get_numberOfTraversalSuccessors(); i++)
+   for(uint i = 0; i < node->get_numberOfTraversalSuccessors(); i++)
    {
       SgNode *child = node->get_traversalSuccessorByIndex(i);
       if(child == NULL) continue;
