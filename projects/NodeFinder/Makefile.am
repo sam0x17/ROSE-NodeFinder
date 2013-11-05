@@ -8,7 +8,7 @@ MOSTLYCLEANFILES =
 noinst_PROGRAMS =
 bin_PROGRAMS =
 CHECK_TARGETS =
-CLEAN_TARGETS =
+CLEAN_TARGETS = NodeFinderTest NodeFinderBenchmark *.a *.o *.txt
 
 #------------------------------------------------------------------------------------------------------------------------
 # Header files, etc
@@ -20,21 +20,26 @@ SPECIMENS =
 EXTRA_DIST += $(SPECIMENS)
 
 #------------------------------------------------------------------------------------------------------------------------
-# NodeFinder (using "fsm_" as a unique test prefix)
-#noinst_LIBRARIES = libnodefinder.a
-#libnodefinder_a_SOURCES = NodeFinderResult.C NodeFinder.C
-#libnodefinder_a_CPPFLAGS = $(ROSE_INCLUDES)
-#libnodefinder_a_LIBADD = $(LIBS_WITH_RPATH) $(ROSE_LIBS)
-# NodeFinder (using "fsm_" as a unique test prefix)
-bin_PROGRAMS += NodeFinder
-NodeFinder_SOURCES = NodeFinderResult.C NodeFinder.C
-NodeFinder_CPPFLAGS = $(ROSE_INCLUDES)
-NodeFinder_LDADD = $(LIBS_WITH_RPATH) $(ROSE_LIBS)
-
+# NodeFinder
+noinst_LIBRARIES = libnodefinder.a
+libnodefinder_a_SOURCES = NodeFinderResult.C NodeFinder.C
+INCLUDES = $(ROSE_INCLUDES)
+LDADD = $(ROSE_LIBS)
+#------------------------------------------------------------------------------------------------------------------------
+# NodeFinder Tests
+noinst_PROGRAMS += NodeFinderTest
+NodeFinderTest_SOURCES = NodeFinderTest.C
+NodeFinderTest_CPPFLAGS = $(ROSE_INCLUDES)
+NodeFinderTest_LDADD = $(LIBS_WITH_RPATH) $(ROSE_LIBS) libnodefinder.a
 #------------------------------------------------------------------------------------------------------------------------
 # automake check and clean rules
 check-local: $(CHECK_TARGETS)
-clean-local: $(CLEAN_TARGETS)
+	make test
+check:
+	make test
+clean: $(CLEAN_TARGETS)
 	rm -f $(MOSTLYCLEANFILES)
+test:
+	./NodeFinderTest --edg:no_warnings $(srcdir)/test_sample.C
 
 endif
