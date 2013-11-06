@@ -29,8 +29,6 @@ NodeFinderResult NodeFinder::find(SgNode *search_root, VariantT search_type)
       end_index = info->end_index - 1;
       if(end_index < 0) end_index = 0;
    }
-   //std::cout << "begin index: " << begin_index << std::endl;
-   //std::cout << "end index: " << end_index << std::endl;
    return NodeFinderResult(node_map[search_type], begin_index, end_index);
 }
 
@@ -44,13 +42,16 @@ void NodeFinder::rebuildIndex(SgNode *index_root)
    this->index_root = index_root;
    node_region_map.clear();
    node_map.clear();
-   for(uint i = 0; i < node_region_map_allocations.size(); i++) delete node_region_map_allocations[i];
-   for(uint i = 0; i < node_map_allocations.size(); i++) delete node_map_allocations[i];
+   for(uint i = 0; i < node_region_map_allocations.size(); i++)
+      delete node_region_map_allocations[i];
+   for(uint i = 0; i < node_map_allocations.size(); i++)
+      delete node_map_allocations[i];
    node_region_map_allocations.clear();
    node_map_allocations.clear();
    rebuildIndex_helper(index_root);
    node_contained_types.clear(); // don't need node_contained_types to perform searches
-   for(uint i = 0; i < node_contained_types_allocations.size(); i++) delete node_contained_types_allocations[i];
+   for(uint i = 0; i < node_contained_types_allocations.size(); i++)
+      delete node_contained_types_allocations[i];
    node_contained_types_allocations.clear();
 }
 
@@ -124,7 +125,6 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
                   current_info.begin_index = child_info->begin_index;
                if(child_info->end_index > current_info.end_index)
                   current_info.end_index = child_info->end_index;
-               //std::cout << "merging: (" << current_info.begin_index << ", " << current_info.end_index << ") + (" << child_info->begin_index << ", " << child_info->end_index << ") = (" << current_info.begin_index << ", " << current_info.end_index << ")" << std::endl;
             }
          }
          (*current_region_map)[type] = current_info;

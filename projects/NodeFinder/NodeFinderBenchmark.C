@@ -42,7 +42,7 @@ int main(int argc, char** argv)
    NodeFinder finder(root_node);
    AstMatching matcher;
 
-   double minutes = 1.0/6;
+   double minutes = 1.0/12;
    clock_t begin;
    clock_t dest_clock = (clock_t)(minutes * 60 * CLOCKS_PER_SEC);
 
