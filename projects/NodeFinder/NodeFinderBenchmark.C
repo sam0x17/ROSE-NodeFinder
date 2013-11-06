@@ -39,64 +39,89 @@ int main(int argc, char** argv)
 
    std::cout << "AST loaded successfully." << std::endl;
 
-   clock_t begin, end;
-   double total_time;
-
    NodeFinder finder(root_node);
    AstMatching matcher;
+
+   double minutes = 1.0/6;
+   clock_t begin;
+   clock_t dest_clock = (clock_t)(minutes * 60 * CLOCKS_PER_SEC);
+
+   std::cout << std::endl << "Benchmarks will run for " << (int)(minutes * 60) << " CPU seconds (" << dest_clock << " CPU cycles) each" << std::endl;
+   std::cout << "Results will be printed in terms of the # of iterations each algorithm was able to run within the given time frame." << std::endl;
 
    std::cout << std::endl << "Comparing traversal speed..." << std::endl << std::endl;
 
    std::cout << "AST Matching\tNodeFinder" << std::endl;
 
-
-   int iterations = 10000;
-
+   long iterations;
 
    begin = clock();
-   for(int i = 0; i < iterations; i++)
+   for(iterations = 0;; iterations++)
    {
       matcher.performMatching("$v=SgVarRefExp", root_node);
+      if(clock() - begin >= dest_clock) break;
    }
-   end = clock();
-   total_time = (double)(end - begin) / CLOCKS_PER_SEC;
 
-   std::cout << total_time << std::flush << "\t\t";
+   std::cout << iterations << std::flush << "\t\t";
 
    begin = clock();
-   for(int i = 0; i < iterations; i++)
+   for(iterations = 0;; iterations++)
    {
       finder.rebuildIndex();
+      if(clock() - begin >= dest_clock) break;
    }
-   end = clock();
-   total_time = (double)(end - begin) / CLOCKS_PER_SEC;
-
-   std::cout << total_time << std::flush << std::endl;
+   std::cout << iterations << std::flush << std::endl;
 
 
-   std::cout << std::endl << std::endl << "Comparing search time..." << std::endl << std::endl;
+   std::cout << std::endl << std::endl << "Comparing search speed..." << std::endl << std::endl;
    std::cout << "AST Matching\tNodeFinder" << std::flush << std::endl;
 
    begin = clock();
-   for(int i = 0; i < iterations; i++)
+   for(iterations = 0;; iterations++)
    {
       matcher.performMatching("$v=SgVarRefExp", root_node);
+      if(clock() - begin >= dest_clock) break;
    }
-   end = clock();
-   total_time = (double)(end - begin) / CLOCKS_PER_SEC;
-   std::cout << total_time << "\t\t\t" << std::flush;
+   std::cout << iterations << "\t\t" << std::flush;
+
+
+   begin = clock();
+   for(iterations = 0;; iterations++)
+   {
+      finder.find(root_node, V_SgVarRefExp);
+      if(clock() - begin >= dest_clock) break;
+   }
+   std::cout << iterations << std::flush << std::endl;
+
+
+   std::cout << std::endl << std::endl << "Comparing search iteration speed..." << std::endl << std::endl;
+   std::cout << "AST Matching\tNodeFinder" << std::flush << std::endl;
+
+   begin = clock();
+   for(iterations = 0;; iterations++)
+   {
+      MatchResult matches = matcher.performMatching("$v=SgVarRefExp", root_node);
+      BOOST_FOREACH(SingleMatchVarBindings match, matches)
+      {
+         SgVarRefExp *var = (SgVarRefExp *)match["$v"];
+      }
+      if(clock() - begin >= dest_clock) break;
+   }
+   std::cout << iterations << "\t\t" << std::flush;
 
 
    begin = clock();
    finder.rebuildIndex();
-   for(int i = 0; i < iterations; i++)
+   for(iterations = 0;; iterations++)
    {
-      finder.find(root_node, V_SgVarRefExp);
+      NodeFinderResult res = finder.find(root_node, V_SgVarRefExp);
+      BOOST_FOREACH(SgNode *node, res)
+      {
+         SgVarRefExp *var = (SgVarRefExp *)node;
+      }
+      if(clock() - begin >= dest_clock) break;
    }
-   end = clock();
-   total_time = (double)(end - begin) / CLOCKS_PER_SEC;
-
-   std::cout << total_time << std::endl;
+   std::cout << iterations << std::flush << std::endl;
 
 
    std::cout << std::endl << "NodeFinder vs AST Matching benchmarks: [DONE]" << std::endl;
