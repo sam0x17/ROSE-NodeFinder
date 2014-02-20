@@ -8,7 +8,7 @@ MOSTLYCLEANFILES =
 noinst_PROGRAMS =
 bin_PROGRAMS =
 CHECK_TARGETS =
-CLEAN_TARGETS = SourceLoaderTest *.a *.o *.txt
+CLEAN_TARGETS = SourceLoaderTest srcloader *.a *.o *.txt
 
 #------------------------------------------------------------------------------------------------------------------------
 # Header files, etc
@@ -26,11 +26,17 @@ libsourceloader_a_SOURCES = SourceLoader.C
 INCLUDES = $(ROSE_INCLUDES)
 LDADD = $(ROSE_LIBS)
 #------------------------------------------------------------------------------------------------------------------------
+# srcloader
+noinst_PROGRAMS += srcloader
+srcloader_SOURCES = srcloader.C
+srcloader_CPPFLAGS = $(ROSE_INCLUDES)
+srcloader_LDADD = $(LIBS_WITH_RPATH) $(ROSE_LIBS) libsourceloader.a
+#------------------------------------------------------------------------------------------------------------------------
 # SourceLoader Tests
 noinst_PROGRAMS += SourceLoaderTest
-NodeFinderTest_SOURCES = SourceLoaderTest.C
-NodeFinderTest_CPPFLAGS = $(ROSE_INCLUDES)
-NodeFinderTest_LDADD = $(LIBS_WITH_RPATH) $(ROSE_LIBS) libsourceloader.a
+SourceloaderTest_SOURCES = SourceLoaderTest.C
+SourceLoaderTest_CPPFLAGS = $(ROSE_INCLUDES)
+SourceLoaderTest_LDADD = $(LIBS_WITH_RPATH) $(ROSE_LIBS) libsourceloader.a
 #------------------------------------------------------------------------------------------------------------------------
 # automake check and clean rules
 check-local: $(CHECK_TARGETS)

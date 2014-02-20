@@ -7,5 +7,13 @@
 #ifndef ROSE_Project_SourceLoader_H
 #define ROSE_Project_SourceLoader_H
 
+class SourceLoader
+{
+	public:
+		
+
+	private:
+		
+}
 
 #endif
