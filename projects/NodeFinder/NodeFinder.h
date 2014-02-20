@@ -22,6 +22,13 @@ class NodeFinder
        * will index */
       NodeFinder(SgNode *index_root);
 
+
+		/* same as default constructor but includes option of whether to enable the alternate
+       * indexing method (which only takes O(n)) at the cost of O(log(m)) find times where
+		 * m is the number of nodes of the type being searched for that are decendents of the
+		 * node currently being searched */
+		NodeFinder(SgNode *index_root, bool use_alt_method);
+
       /* Rebuilds the node index (should be called if a change to the AST has occurred.
        * Automatically called by the NodeFinder constructor. Runs in O(n) time where n
        * is the number of nodes that are descendants of the index_root node. */
@@ -31,6 +38,8 @@ class NodeFinder
        * index. Automatically called by the NodeFinder constructor. Runs in O(n) time
        * where n is the number of nodes that are descendants of index_root. */
       void rebuildIndex(SgNode *index_root);
+
+		void rebuildIndex(SgNode *index_root, bool use_alt_method);
 
       /* Returns a NodeFinderResult containing the list of nodes of type search_type
        * that are descendants of of the node search_root. This function runs in O(1)
@@ -55,15 +64,29 @@ class NodeFinder
       };
 
    private:
+		int current_df_index;
+		bool use_alt_method;
       void rebuildIndex_helper(SgNode *node);
+		inline NodeFinderResult find_alt(SgNode *search_root, VariantT search_type);
+		inline void rebuildIndex_alt(SgNode *index_root);
+		void rebuildIndex_helper_alt(SgNode *node);
       SgNode *index_root;
+
+		// index data structures
       boost::unordered_map<SgNode*, boost::unordered_map<VariantT, region_info>*> node_region_map;
       boost::unordered_map<SgNode*, boost::unordered_set<VariantT>*> node_contained_types;
       boost::unordered_map<VariantT, std::vector<SgNode*>*> node_map;
 
+		// index data structure memory allocation tracking
       std::vector<boost::unordered_map<VariantT, region_info>*> node_region_map_allocations;
       std::vector<boost::unordered_set<VariantT>*> node_contained_types_allocations;
       std::vector<std::vector<SgNode*>*> node_map_allocations;
+};
+
+class DepthFirstIndexAttribute : public AstAttribute
+{
+	public:
+		int df_index;
 };
 
 #endif

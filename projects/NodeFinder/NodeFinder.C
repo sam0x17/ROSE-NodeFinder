@@ -9,12 +9,21 @@
 NodeFinder::NodeFinder(SgNode *index_root)
 {
    this->index_root = index_root;
+	this->use_alt_method = false;
    rebuildIndex(index_root);
+}
+
+NodeFinder::NodeFinder(SgNode *index_root, bool use_alt_method)
+{
+	this->index_root = index_root;
+	this->use_alt_method = use_alt_method;
 }
 
 NodeFinderResult NodeFinder::find(SgNode *search_root, VariantT search_type)
 {
    ROSE_ASSERT(search_root != NULL);
+	if(use_alt_method)
+		return find_alt(search_root, search_type);
    boost::unordered_map<VariantT, region_info> *relevant_info = node_region_map[search_root];
    region_info *info = &((*relevant_info)[search_type]);
    int begin_index;
@@ -32,9 +41,20 @@ NodeFinderResult NodeFinder::find(SgNode *search_root, VariantT search_type)
    return NodeFinderResult(node_map[search_type], begin_index, end_index);
 }
 
+NodeFinderResult NodeFinder::find_alt(SgNode *search_root, VariantT search_type)
+{
+	return NodeFinderResult(NULL, 0, 0);
+}
+
 void NodeFinder::rebuildIndex()
 {
    rebuildIndex(index_root);
+}
+
+void NodeFinder::rebuildIndex(SgNode *index_root, bool use_alt_method)
+{
+	this->use_alt_method = use_alt_method;
+	rebuildIndex(index_root);
 }
 
 void NodeFinder::rebuildIndex(SgNode *index_root)
@@ -48,18 +68,31 @@ void NodeFinder::rebuildIndex(SgNode *index_root)
       delete node_map_allocations[i];
    node_region_map_allocations.clear();
    node_map_allocations.clear();
-   rebuildIndex_helper(index_root);
+	if(use_alt_method)
+	{
+		rebuildIndex_alt(index_root);
+	} else {
+   	rebuildIndex_helper(index_root);
+	}
    node_contained_types.clear(); // don't need node_contained_types to perform searches
    for(uint i = 0; i < node_contained_types_allocations.size(); i++)
       delete node_contained_types_allocations[i];
    node_contained_types_allocations.clear();
 }
 
+void NodeFinder::rebuildIndex_alt(SgNode *index_root)
+{
+	ROSE_ASSERT(use_alt_method);
+	ROSE_ASSERT(index_root != NULL);
+	current_df_index = 0;
+	rebuildIndex_helper_alt(index_root);
+}
+
 void NodeFinder::rebuildIndex_helper(SgNode *node)
 {
    ROSE_ASSERT(node != NULL);
 
-   // add node to the corresponding vector
+   // add node to the corresponding type vector
    std::vector<SgNode*> *current_list;
    if(node_map.count(node->variantT()) > 0)
    {
@@ -130,5 +163,39 @@ void NodeFinder::rebuildIndex_helper(SgNode *node)
          (*current_region_map)[type] = current_info;
       }
    }
+}
 
+void NodeFinder::rebuildIndex_helper_alt(SgNode *node)
+{
+	ROSE_ASSERT(node != NULL);
+	DepthFirstIndexAttribute *att;
+	if(node->attributeExists("depth-first-index"))
+	{
+		att = (DepthFirstIndexAttribute*)(node->getAttribute("depth-first-index"));
+	} else {
+		att = new DepthFirstIndexAttribute();
+	}
+	att->df_index = current_df_index++; // intentionally post increment
+	
+	// add node to the corresponding type vector
+	std::vector<SgNode*> *current_list;
+   if(node_map.count(node->variantT()) > 0)
+   {
+      current_list = node_map[node->variantT()];
+   } else {
+      current_list = new std::vector<SgNode*>();
+      node_map_allocations.push_back(current_list);
+      node_map[node->variantT()] = current_list;
+   }
+   current_list->push_back(node);
+
+   // traverse children
+   for(uint i = 0; i < node->get_numberOfTraversalSuccessors(); i++)
+   {
+      SgNode *child = node->get_traversalSuccessorByIndex(i);
+      if(child == NULL) continue;
+
+		// recursive call
+		rebuildIndex_helper_alt(child);
+	}
 }
