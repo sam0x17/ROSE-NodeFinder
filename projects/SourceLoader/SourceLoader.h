@@ -7,6 +7,10 @@
 #ifndef ROSE_Project_SourceLoader_H
 #define ROSE_Project_SourceLoader_H
 
+#include <stdio.h>
+#include <string.h>
+#include <rose.h>
+
 class SourceLoader
 {
 	public:
