@@ -5,6 +5,12 @@
  *      Author: Sam Kelly <kellys@dickinson.edu>
  */
 #include <NodeFinder.h>
+class DepthFirstIndexAttribute : public AstAttribute
+{
+	public:
+		int df_index;
+};
+
 
 NodeFinder::NodeFinder(SgNode *index_root)
 {

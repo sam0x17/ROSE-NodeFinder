@@ -83,10 +83,6 @@ class NodeFinder
       std::vector<std::vector<SgNode*>*> node_map_allocations;
 };
 
-class DepthFirstIndexAttribute : public AstAttribute
-{
-	public:
-		int df_index;
-};
+
 
 #endif
