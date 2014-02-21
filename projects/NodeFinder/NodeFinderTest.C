@@ -13,10 +13,9 @@
 int main(int argc, char** argv)
 {
    // load specified source file(s) into ROSE and get the root SgNode
+   std::cout << "Loading AST: ";
    SgProject *project = frontend(argc, argv);
    SgNode *root_node = (SgNode*)project;
-
-   std::cout << "Loading AST: ";
    ROSE_ASSERT(boost::starts_with(root_node->sage_class_name(), "SgProject"));
    std::cout << "[DONE]" << std::endl;
    NodeFinder finder = NodeFinder(root_node);
