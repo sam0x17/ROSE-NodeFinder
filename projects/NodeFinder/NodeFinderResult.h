@@ -26,9 +26,9 @@ class NodeFinderResult
       iterator begin() { return &(*nodes)[begin_index]; }
       iterator end() { return &(*nodes)[end_index]; }
    private:
-      std::vector<SgNode*> *nodes;
       int begin_index;
       int end_index;
+      std::vector<SgNode*> *nodes;
 };
 
 

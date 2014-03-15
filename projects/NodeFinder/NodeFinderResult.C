@@ -26,7 +26,7 @@ SgNode* NodeFinderResult::operator [](int index)
    ROSE_ASSERT(index >= 0);
    ROSE_ASSERT(index < size());
    ROSE_ASSERT(nodes != NULL);
-   return (*nodes)[begin_index + index];
+	return nodes->operator[](begin_index + index);
 }
 
 

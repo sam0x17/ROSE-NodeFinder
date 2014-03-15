@@ -36,7 +36,7 @@ void deep_func()
                                     if(a); // if 9
                                     if(a); // if 10
                                     if(a); // if 11
-                                    int target_seven; // var 12
+                                    bool target_seven; // var 12
                                     int target_eight; // var 13
                                     int target_nine; // var 14
                                  }
