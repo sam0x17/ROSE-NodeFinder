@@ -215,4 +215,5 @@ int main(int argc, char** argv)
    }
    std::cout << iterations << std::flush << std::endl;
    std::cout << std::endl << "NodeFinder Benchmarks: [DONE]" << std::endl;
+	finder.dispose();
 }
