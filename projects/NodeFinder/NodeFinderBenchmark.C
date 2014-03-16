@@ -32,7 +32,7 @@ int main(int argc, char** argv)
    }
    if(!found_source_file)
    {
-      std::cout << "Error: no source file was specified!" << std::endl;
+      std::cout << "Error: no source file was specified (must end in .C or .cpp)!" << std::endl;
       return 1;
    }
 
