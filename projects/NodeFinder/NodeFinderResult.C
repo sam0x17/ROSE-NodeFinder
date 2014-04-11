@@ -29,5 +29,3 @@ SgNode* NodeFinderResult::operator [](int index)
 	return nodes->operator[](begin_index + index);
 }
 
-
-

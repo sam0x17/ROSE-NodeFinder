@@ -12,6 +12,11 @@ class DepthFirstIndexAttribute : public AstAttribute
 		int num_descendants;
 };
 
+NodeFinder::NodeFinder()
+{
+   this->index_root = NULL;
+   this->use_alt_method = false;
+}
 
 NodeFinder::NodeFinder(SgNode *index_root)
 {

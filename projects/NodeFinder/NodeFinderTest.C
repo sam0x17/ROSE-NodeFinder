@@ -131,6 +131,22 @@ std::vector<NodeFinderResult>* find_tests(NodeFinder finder, SgNode *root_node)
    NodeFinderResult namespace_res = finder.find(if_res_1[0], V_SgNamespaceDeclarationStatement);
    ROSE_ASSERT(namespace_res.size() == 0);
 	arr->push_back(namespace_res);
+
+   SgNode *node1 = NULL;
+   BOOST_FOREACH(SgNode *node, var_dec_res_10)
+   {
+      node1 = node;
+      ROSE_ASSERT(false);
+      // should be empty
+   }
+   ROSE_ASSERT(node1 == NULL);
+   BOOST_FOREACH(SgNode *node, namespace_res)
+   {
+      node1 = node;
+      ROSE_ASSERT(false);
+      // should be empty
+   }
+   ROSE_ASSERT(node1 == NULL);
    std::cout << "[PASS]" << std::endl;
 
 	return arr;

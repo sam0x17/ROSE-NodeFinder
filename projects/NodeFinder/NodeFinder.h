@@ -18,6 +18,9 @@
 class NodeFinder
 {
    public:
+      // 0-arg constructor
+      NodeFinder();
+
       /* index_root: a pointer to the root node of the portion of the AST that this NodeFinder
        * will index */
       NodeFinder(SgNode *index_root);
@@ -64,9 +67,11 @@ class NodeFinder
 		int getDepthFirstIndex(SgNode *node);
 
 		// returns the total number of nodes in the current AST that have been indexed
+      // cost: O(1)
 		int getTotalNodes();
 
 		// returns the number of descendants of the specified node that have been indexed
+      // cost: O(1)
 		int getNumDescendants(SgNode *node);
 
       /* Internal data structure used by NodeFinder classes to represent an
