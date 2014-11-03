@@ -128,7 +128,8 @@ TESTCODES_REQUIRED_TO_PASS = \
      cave3_while1.java \
      cave3_while2.java \
      cave3_while3.java \
-     cave3_while4.java
+     cave3_while4.java \
+     testQualifiedType.java
 
 #
 # These test pass the compilation using ROSE, all AST tests, unparsing to generate 
@@ -542,9 +543,13 @@ testJavaCommandlineOptions: $(testTranslator)
 #-----------------------------
 # Destdir
 #-----------------------------
+	mkdir -p "$(builddir)/tmp/destdir"
 	$(testTranslator) "$(top_srcdir)/tests/input_codes/minimal/minimal.java" -rose:java:d "$(builddir)/tmp/destdir"
 	$(testTranslator) "$(top_srcdir)/tests/input_codes/minimal/minimal.java" -d "$(builddir)/tmp/destdir"
+#-----------------------------
 # Source Destdir
+#-----------------------------
+	mkdir -p "$(builddir)/tmp/source_destdir"
 	$(testTranslator) "$(top_srcdir)/tests/input_codes/minimal/minimal.java" -rose:java:ds "$(builddir)/tmp/source_destdir"
 #-----------------------------
 # Source

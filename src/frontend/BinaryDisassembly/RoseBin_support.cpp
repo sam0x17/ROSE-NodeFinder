@@ -1,5 +1,5 @@
-// tps (01/14/2010) : Switching from rose.h to sage3.
-#include "sage3basic.h"
+#include "sage3basic.h"                                 // every librose .C file must start with this
+
 #include "RoseBin_support.h"
 
 using namespace std;
@@ -116,79 +116,44 @@ std::string RoseBin_support::resolveValue(SgAsmValueExpression* expr,
                                           uint64_t &quad_word_val,
                                           bool unparseSignedConstants) {
   string res="...";
-  ostringstream os; 
-  if (isSgAsmByteValueExpression(expr)) {
-    SgAsmByteValueExpression* valExp = isSgAsmByteValueExpression(expr);
-    byte_val = valExp->get_value(); 
-    //res = "(byte)" + RoseBin_support::ToString(val);
-    if (is_mnemonic_call)
-      os << hex << (unsigned int)byte_val; 
-    else if (unparseSignedConstants)
-      os << dec << (int8_t)byte_val;
-    else
-      os << "0x" << hex << (unsigned int)byte_val; 
-    res = os.str();
-  } else
-
-    if (isSgAsmDoubleFloatValueExpression(expr)) {
-      SgAsmDoubleFloatValueExpression* valExp = isSgAsmDoubleFloatValueExpression(expr);
-      double val = valExp->get_value(); 
+  ostringstream os;
+  if (SgAsmIntegerValueExpression *ival = isSgAsmIntegerValueExpression(expr)) {
+      switch (ival->get_significantBits()) {
+          case 8:
+              byte_val = ival->get_value();
+              break;
+          case 16:
+              word_val = ival->get_value();
+              break;
+          case 32:
+              double_word_val = ival->get_value();
+              break;
+          case 64:
+              quad_word_val = ival->get_value();
+              break;
+          default:
+              return res;
+      }
+      if (is_mnemonic_call) {
+          os <<hex <<ival->get_value();
+          res = os.str();
+      } else if (unparseSignedConstants) {
+          res = StringUtility::numberToString(ival->get_signedValue());
+      } else {
+          res = StringUtility::addrToString(ival->get_value(), ival->get_significantBits());
+      }
+  } else if (SgAsmFloatValueExpression *fv = isSgAsmFloatValueExpression(expr)) {
+      double val = fv->get_nativeValue();
       os << "0x" << hex << val;
       res = os.str();
-      //res = "(dfloat)" + RoseBin_support::ToString(val);
-    } else
-
-      if (isSgAsmDoubleWordValueExpression(expr)) {
-        SgAsmDoubleWordValueExpression* valExp = isSgAsmDoubleWordValueExpression(expr);
-        double_word_val = valExp->get_value(); 
-        // int int_val = static_cast<int> (val);
-        // res = "(dword)" + RoseBin_support::ToString(int_val);
-        if (is_mnemonic_call)
-          os << hex << double_word_val; 
-        else if (unparseSignedConstants)
-          os << dec << (int32_t)double_word_val;
-        else
-          os << "0x" << hex << double_word_val; 
-        res = os.str();
-      } else
-
-        if (isSgAsmSingleFloatValueExpression(expr)) {
-          SgAsmSingleFloatValueExpression* valExp = isSgAsmSingleFloatValueExpression(expr);
-          float val = valExp->get_value(); 
-          os << "0x" << hex << val;
-          res = os.str();
-          //res = "(float)" + RoseBin_support::ToString(val);
-        } else
-
-          if (isSgAsmQuadWordValueExpression(expr)) {
-            SgAsmQuadWordValueExpression* valExp = isSgAsmQuadWordValueExpression(expr);
-            quad_word_val = valExp->get_value(); 
-            if (unparseSignedConstants)
-              os << dec << (int64_t)quad_word_val;
-            else
-              os << "0x" << hex << quad_word_val;
-            res = os.str();
-            //res = "(qword)" + RoseBin_support::ToString(val);
-          } else
-
-
-              if (isSgAsmWordValueExpression(expr)) {
-                SgAsmWordValueExpression* valExp = isSgAsmWordValueExpression(expr);
-                word_val = valExp->get_value(); 
-                if (unparseSignedConstants)
-                  os << dec << (int16_t)word_val;
-                else
-                  os << "0x" << hex << word_val;
-                res = os.str();
-                //              res = "(word)" + RoseBin_support::ToString(val);
-              } 
+  }
 
   return res;
 }
 
 bool isAsmUnconditionalBranch(SgAsmInstruction* insn) {
   switch (insn->variantT()) {
-    case V_SgAsmx86Instruction: return x86InstructionIsUnconditionalBranch(isSgAsmx86Instruction(insn));
+    case V_SgAsmX86Instruction: return x86InstructionIsUnconditionalBranch(isSgAsmX86Instruction(insn));
     // case V_SgAsmArmInstruction: return armInstructionIsUnconditionalBranch(isSgAsmArmInstruction(insn));
         default: { ROSE_ASSERT (!"Bad instruction type"); /* Avoid MSVC warning. */ return false; }
   }
@@ -196,7 +161,7 @@ bool isAsmUnconditionalBranch(SgAsmInstruction* insn) {
 
 bool isAsmBranch(SgAsmInstruction* insn) {
   switch (insn->variantT()) {
-    case V_SgAsmx86Instruction: return x86InstructionIsControlTransfer(isSgAsmx86Instruction(insn));
+    case V_SgAsmX86Instruction: return x86InstructionIsControlTransfer(isSgAsmX86Instruction(insn));
     // case V_SgAsmArmInstruction: return armInstructionIsBranch(isSgAsmArmInstruction(insn));
         default: { ROSE_ASSERT (!"Bad instruction type"); /* Avoid MSVC warning. */ return false; }
   }

@@ -5,12 +5,14 @@
 #include "FormatRestorer.h"
 #include "SMTSolver.h"
 
-#include <cassert>
 #include <boost/shared_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/optional.hpp>
+#include <sawyer/Assert.h>
+#include <sawyer/IntervalMap.h>
+#include <sawyer/Map.h>
 
-// Documented elsewhere
+namespace rose {
 namespace BinaryAnalysis {
 
 /** Binary instruction semantics.
@@ -86,7 +88,7 @@ namespace BinaryAnalysis {
  *  @code
  *      // user code
  *      #include <IntervalSemantics.h>
- *      using namespace BinaryAnalysis::InstructionSemantics2;
+ *      using namespace rose::BinaryAnalysis::InstructionSemantics2;
  *      BaseSemantics::SValuePtr value = IntervalSemantics::SValue::instance();
  *      // no need to ever delete the object that 'value' points to
  *  @endcode
@@ -236,8 +238,8 @@ namespace BinaryAnalysis {
  *
  *  @section IS5 Other major changes
  *
- *  The new API exists in the BinaryAnalysis::InstructionSemantics2 name space and can coexist with the original API in
- *  BinaryAnalysis::InstructionSemantics&mdash;a program can use both APIs at the same time.
+ *  The new API exists in the rose::BinaryAnalysis::InstructionSemantics2 name space and can coexist with the original API in
+ *  rose::BinaryAnalysis::InstructionSemantics&mdash;a program can use both APIs at the same time.
  *
  *  The mapping of class names (and some method) from old API to new API is:
  *  <ul>
@@ -277,12 +279,12 @@ namespace BinaryAnalysis {
  *
  *  @code
  *   // New API 
- *   using namespace BinaryAnalysis::InstructionSemantics2;
+ *   using namespace rose::BinaryAnalysis::InstructionSemantics2;
  *   BaseSemantics::RiscOperatorsPtr operators = SymbolicSemantics::RiscOperators::instance();
  *   BaseSemantics::DispatcherPtr dispatcher = DispatcherX86::instance(operators);
  *
  *   // Old API for comparison
- *   using namespace BinaryAnalysis::InstructionSemantics;
+ *   using namespace rose::BinaryAnalysis::InstructionSemantics;
  *   typedef SymbolicSemantics::Policy<> Policy;
  *   Policy policy;
  *   X86InstructionSemantics<Policy, SymbolicSemantics::ValueType> semantics(policy);
@@ -294,7 +296,7 @@ namespace BinaryAnalysis {
  *  @code
  *   // New API, constructing the lattice from bottom up.
  *   // Almost copied from SymbolicSemantics::RiscOperators::instance()
- *   using namespace BinaryAnalysis::InstructionSemantics2;
+ *   using namespace rose::BinaryAnalysis::InstructionSemantics2;
  *   BaseSemantics::SValuePtr protoval = MySemanticValue::instance();
  *   BaseSemantics::RegisterStatePtr regs = BaseSemantics::RegisterStateX86::instance(protoval);
  *   BaseSemantics::MemoryStatePtr mem = SymbolicSemantics::MemoryState::instance(protoval);
@@ -305,7 +307,7 @@ namespace BinaryAnalysis {
  *   // components as easily, and the implementation of MySemanticValue would certainly have been
  *   // more complex, not to mention that it wasn't even possible for end users to always correctly
  *   // override a particular method by subclassing.
- *   using namespace BinaryAnalysis::InstructionSemantics;
+ *   using namespace rose::BinaryAnalysis::InstructionSemantics;
  *   typedef SymbolicSemantics::Policy<SymbolicSemantics::State, MySemanticValue> Policy;
  *   Policy policy;
  *   X86InstructionSemantics<Policy, MySemanticValue> semantics(policy);
@@ -409,213 +411,23 @@ public:
 };
 
 /*******************************************************************************************************************************
- *                                      Reference-counting pointers
- *******************************************************************************************************************************/
-
-/** Referenc-counting pointer.  These pointers reference count the object to which they point and have an API similar to
- *  boost::shared_ptr<>.  However, this implementation is much faster (about 90% faster in tests) because it doesn't need to be
- *  as general-purpose as the Boost implementation.  This implementation doesn't support weak pointers or multi-threading, and
- *  it requires public access to an nrefs__ data member in the objects to which it points. */
-template<class T>
-class Pointer {
-private:
-    T *obj;     // object to which this pointer points; null for an empty pointer
-public:
-    typedef T element_type;
-
-    /** Constructs an empty shared pointer. */
-    Pointer(): obj(NULL) {}
-
-    /** Constructs a shared pointer for an object.  If @p obj is non-null then its reference count is incremented. It is
-     *  possible to create any number of shared pointers to the same object using this constructor. The expression "delete obj"
-     *  must be well formed and must not invoke undefined behavior. */
-    template<class Y>
-    explicit Pointer(Y *obj): obj(obj) {
-        if (obj!=NULL)
-            ++obj->nrefs__;
-    }
-
-    /** Constructs a new pointer that shares ownership of the pointed-to object with the @p other pointer. The pointed-to
-     *  object will only be deleted after both pointers are deleted.
-     * @{ */
-    Pointer(const Pointer &other): obj(other.obj) {
-        assert(obj==NULL || obj->nrefs__>0);
-        if (obj!=NULL)
-            ++obj->nrefs__;
-    }
-    template<class Y>
-    Pointer(const Pointer<Y> &other): obj(other.get()) {
-        if (obj!=NULL)
-            ++obj->nrefs__;
-    }
-    /** @} */
-    
-    /** Conditionally deletes the pointed-to object.  The object is deleted when its reference count reaches zero. */
-    ~Pointer() {
-        assert(obj==NULL || obj->nrefs__>0);
-        if (obj!=NULL && 0==--obj->nrefs__)
-            delete obj;
-    }
-
-    /** Assignment. This pointer is caused to point to the same object as @p other, decrementing the reference count for the
-     * object originally pointed to by this pointer and incrementing the reference count for the object pointed by @p other.
-     * @{ */
-    Pointer& operator=(const Pointer &other) {
-        assert(obj==NULL || obj->nrefs__>0);
-        if (obj!=NULL && 0==--obj->nrefs__)
-            delete obj;
-        obj = other.obj;
-        assert(obj==NULL || obj->nrefs__>0);
-        if (obj!=NULL)
-            ++obj->nrefs__;
-        return *this;
-    }
-    template<class Y>
-    Pointer& operator=(const Pointer<Y> &other) {
-        assert(obj==NULL || obj->nrefs__>0);
-        if (obj!=NULL && 0==--obj->nrefs__)
-            delete obj;
-        obj = other.get();
-        assert(obj==NULL || obj->nrefs__>0);
-        if (obj!=NULL)
-            ++obj->nrefs__;
-        return *this;
-    }
-    /** @} */
-
-    /** Reference to the pointed-to object.  An assertion will fail if assertions are enabled and this method is invoked on an
-     *  empty pointer. */
-    T& operator*() const {
-        assert(obj!=NULL && obj->nrefs__>0);
-        return *obj;
-    }
-
-    /** Dereference pointed-to object. The pointed-to object is returned. Returns null for empty pointers. */
-    T* operator->() const {
-        assert(!obj || obj->nrefs__>0);
-        return obj; // may be null
-    }
-
-    /** Obtain the pointed-to object.  The pointed-to object is returned. Returns null for empty pointers. */
-    T* get() const {
-        assert(obj==NULL || obj->nrefs__>0);
-        return obj; // may be null
-    }
-
-    /** Returns the pointed-to object's reference count. Returns zero for empty pointers. */
-    long use_count() const {
-        assert(obj==NULL || obj->nrefs__>0);
-        return obj==NULL ? 0 : obj->nrefs__;
-    }
-
-    bool operator==(T *ptr) const { return obj==ptr; }
-    bool operator!=(T *ptr) const { return obj!=ptr; }
-    bool operator<(T *ptr) const { return obj<ptr; }
-};
-
-/** Cast one pointer type to another. This behaves the same as dynamic_cast<> except it updates the pointed-to object's
- *  reference count. */
-template<class T, class U>
-Pointer<T> dynamic_pointer_cast(const Pointer<U> &other)
-{
-    T* obj = dynamic_cast<T*>(other.get());
-    return Pointer<T>(obj);
-}
-
-/*******************************************************************************************************************************
- *                                      Memory Allocators
- *******************************************************************************************************************************/
-
-/** Fast memory allocator for small objects.  This memory allocator is used for semantic values and works by requesting large
- *  blocks of objects from the global operator new and maintaining a free list thereof.  User requests for objects return
- *  objects from the free list, and user deallocations return them to the free list.  The allocator will also be used for
- *  subclasses (unless the user overrides the operator new and operator delete in the subclass) and can handle a variety
- *  of object sizes. */
-class Allocator {
-private:
-    struct Bucket {
-        enum { SIZE = 81920 };          // FIXME: tune this
-        char buffer[SIZE];
-    };
-
-    struct FreeItem {
-        FreeItem *next;
-    };
-
-    enum { SIZE_DIVISOR = 8 };          // must be >= sizeof(FreeItem)
-    enum { N_FREE_LISTS = 16 };         // number of lists. list[N] has objects of size <= (N+1)*SIZE_DIVISOR
-    FreeItem *freelist[N_FREE_LISTS];
-
-    // Fills the specified freelist by adding another Bucket-worth of objects.
-    void fill_freelist(const int listn) { // hot
-#if 0 /*DEBUGGING [Robb Matzke 2013-03-04]*/
-        std::cerr <<"Allocator::fill_freelist(" <<listn <<")\n";
-#endif
-        assert(listn>=0 && listn<N_FREE_LISTS);
-        const size_t object_size = (listn+1) * SIZE_DIVISOR;
-        assert(object_size >= sizeof(FreeItem));
-        Bucket *b = new Bucket;
-        for (size_t offset=0; offset+object_size<Bucket::SIZE; offset+=object_size) {
-            FreeItem *item = (FreeItem*)(b->buffer+offset);
-            item->next = freelist[listn];
-            freelist[listn] = item;
-        }
-        assert(freelist[listn]!=NULL);
-    }
-
-public:
-    /** Allocate one object of specified size. The size must be non-zero. If the size is greater than the largest objects this
-     *  class manages, then it will call the global operator new to satisfy the request (a warning is printed the first time
-     *  this happens). */
-    void *allocate(size_t size) { // hot
-        assert(size>0);
-        const int listn = (size-1) / SIZE_DIVISOR;
-        if (listn>=N_FREE_LISTS) {
-            static bool warned = false;
-            if (!warned) {
-                std::cerr <<"BinaryAnalysis::InstructionSemantics2::BaseSemantics::Allocator::allocate(): warning:"
-                          <<" object is too large for allocator (" <<size <<" bytes); falling back to global allocator\n";
-                warned = true;
-            }
-            return ::operator new(size);
-        }
-        if (NULL==freelist[listn])
-            fill_freelist(listn);
-        void *retval = freelist[listn];
-        freelist[listn] = freelist[listn]->next;
-#if 0 /*DEBUGGING [Robb Matzke 2013-03-04]*/
-        std::cerr <<"Allocator::allocate(" <<size <<") = " <<retval <<"\n";
-#endif
-        return retval;
-    }
-
-    /** Free one object of specified size.  The @p size must be the same size that was used when the object was allocated. This
-     *  is a no-op if @p ptr is null. */
-    void deallocate(void *ptr, const size_t size) { // hot
-#if 0 /*DEBUGGING [Robb Matzke 2013-03-04]*/
-        std::cerr <<"Allocator::deallocate(" <<ptr <<", " <<size <<")\n";
-#endif
-        if (ptr) {
-            assert(size>0);
-            const int listn = (size-1) / SIZE_DIVISOR;
-            if (listn>=N_FREE_LISTS)
-                return ::operator delete(ptr);
-            FreeItem *item = (FreeItem*)ptr;
-            item->next = freelist[listn];
-            freelist[listn] = item;
-        }
-    }
-};
-
-/*******************************************************************************************************************************
  *                                      Semantic Values
  *******************************************************************************************************************************/
 
+// This is leftover for compatibility with an older API.  The old API had code like this:
+//    User::SValue user_svalue = BaseSemantics::dynamic_pointer_cast<User::SValue>(base_svalue);
+// Which can be replaced now with
+//    User::SValue user_svalue = base_svalue.dynamicCast<User::SValue>();
+template<class To, class From>
+Sawyer::SharedPointer<To> dynamic_pointer_cast(const Sawyer::SharedPointer<From> &from) {
+    return from.template dynamicCast<To>();
+}
+
 /** Smart pointer to an SValue object. SValue objects are reference counted and should not be explicitly deleted.
  *
- *  Note: Although most semantic *Ptr types are based on boost::shared_ptr<>, SValuePtr uses a custom Pointer class which is
+ *  Note: Although most semantic *Ptr types are based on boost::shared_ptr<>, SValuePtr uses Sawyer::SharedPointer which is
  *  substantially faster. */
-typedef Pointer<class SValue> SValuePtr;
+typedef Sawyer::SharedPointer<class SValue> SValuePtr;
 
 /** Base class for semantic values.
  *
@@ -629,9 +441,9 @@ typedef Pointer<class SValue> SValuePtr;
  *  data in intervals, etc.
  *
  *  Semantics value objects are allocated on the heap and reference counted.  The BaseSemantics::SValue is an abstract class
- *  that defines the interface.  See the BinaryAnalysis::InstructionSemantics2 namespace for an overview of how the parts fit
- *  together.*/
-class SValue {
+ *  that defines the interface.  See the rose::BinaryAnalysis::InstructionSemantics2 namespace for an overview of how the parts
+ *  fit together.*/
+class SValue: public Sawyer::SharedObject, public Sawyer::SharedFromThis<SValue>, public Sawyer::SmallObject {
 public:
     long nrefs__; // shouldn't really be public, but need efficient reference from various Pointer<> classes
 protected:
@@ -644,7 +456,7 @@ protected:
     SValue(const SValue &other): nrefs__(0), width(other.width) {}
 
 public:
-    virtual ~SValue() { assert(0==nrefs__); } // hot
+    virtual ~SValue() { ASSERT_require(0==nrefs__); } // hot
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Allocating static constructor.  None are needed--this class is abstract.
@@ -682,16 +494,9 @@ public:
     // Dynamic pointer casts. No-ops since this is the base class
 public:
     static SValuePtr promote(const SValuePtr &x) {
-        assert(x!=NULL);
+        ASSERT_not_null(x);
         return x;
     }
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // Custom allocation.
-public:
-    static Allocator allocator;
-    static void *operator new(size_t size) { return allocator.allocate(size); } // hot
-    static void operator delete(void *ptr, size_t size) { allocator.deallocate(ptr, size); } // hot
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // The rest of the API...
@@ -717,7 +522,7 @@ public:
     virtual bool must_equal(const SValuePtr &other, SMTSolver *solver=NULL) const = 0;
 
     /** Print a value to a stream using default format. The value will normally occupy a single line and not contain leading
-     * space or line termination.  See also, with_format().
+     *  space or line termination.  See also, with_format().
      *  @{ */
     void print(std::ostream &stream) const { Formatter fmt; print(stream, fmt); }
     virtual void print(std::ostream&, Formatter&) const = 0;
@@ -765,7 +570,7 @@ typedef boost::shared_ptr<class RegisterState> RegisterStatePtr;
 
 /** The set of all registers and their values. RegisterState objects are allocated on the heap and reference counted.  The
  *  BaseSemantics::RegisterState is an abstract class that defines the interface.  See the
- *  BinaryAnalysis::InstructionSemantics2 namespace for an overview of how the parts fit together.*/
+ *  rose::BinaryAnalysis::InstructionSemantics2 namespace for an overview of how the parts fit together.*/
 class RegisterState: public boost::enable_shared_from_this<RegisterState> {
 protected:
     SValuePtr protoval;                         /**< Prototypical value for virtual constructors. */
@@ -774,9 +579,9 @@ protected:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Real constructors
 protected:
-    explicit RegisterState(const SValuePtr &protoval, const RegisterDictionary *regdict)
+    RegisterState(const SValuePtr &protoval, const RegisterDictionary *regdict)
         : protoval(protoval), regdict(regdict) {
-        assert(protoval!=NULL);
+        ASSERT_not_null(protoval);
     }
 
 public:
@@ -802,7 +607,7 @@ public:
     // Dynamic pointer casts. No-op since this is the base class.
 public:
     static RegisterStatePtr promote(const RegisterStatePtr &x) {
-        assert(x!=NULL);
+        ASSERT_not_null(x);
         return x;
     }
 
@@ -820,7 +625,17 @@ public:
     void set_register_dictionary(const RegisterDictionary *rd) { regdict = rd; }
     /** @} */
 
-    /** Set all registers to distinct undefined values. */
+    /** Removes stored values from the register state.
+     *
+     *  Depending on the register state implementation, this could either store new, distinct undefined values in each
+     *  register, or it could simply erase all information about stored values leaving the register state truly empty. For
+     *  instance, @ref RegisterStateX86, which stores register values using fixed length arrays assigns new undefined values to
+     *  each element of those arrays, whereas RegisterStateGeneric, which uses variable length arrays to store information
+     *  about a dynamically changing set of registers, clears its arrays to zero length.
+     *
+     *  Register states can also be initialized by clearing them or by explicitly writing new values into each desired
+     *  register (or both). See @ref RegisterStateGeneric::initialize_nonoverlapping for one way to initialize that register
+     *  state. */
     virtual void clear() = 0;
 
     /** Set all registers to the zero. */
@@ -919,17 +734,18 @@ public:
 
 protected:
     Registers registers;                        /**< Values for registers that have been accessed. */
+    bool coalesceOnRead;                        /**< If set, do not modify register representations on readRegister. */
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Real constructors
 protected:
     explicit RegisterStateGeneric(const SValuePtr &protoval, const RegisterDictionary *regdict)
-        : RegisterState(protoval, regdict) {
+        : RegisterState(protoval, regdict), coalesceOnRead(true) {
         clear();
     }
 
     RegisterStateGeneric(const RegisterStateGeneric &other)
-        : RegisterState(other), registers(other.registers) {
+        : RegisterState(other), registers(other.registers), coalesceOnRead(true) {
         deep_copy_values();
     }
 
@@ -954,11 +770,11 @@ public:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Virtual constructors
 public:
-    virtual RegisterStatePtr create(const SValuePtr &protoval, const RegisterDictionary *regdict) const /*override*/ {
+    virtual RegisterStatePtr create(const SValuePtr &protoval, const RegisterDictionary *regdict) const ROSE_OVERRIDE {
         return instance(protoval, regdict);
     }
 
-    virtual RegisterStatePtr clone() const /*override*/ {
+    virtual RegisterStatePtr clone() const ROSE_OVERRIDE {
         return RegisterStateGenericPtr(new RegisterStateGeneric(*this));
     }
 
@@ -969,18 +785,18 @@ public:
      *  will fail if @p from does not point to a RegisterStateGeneric object. */
     static RegisterStateGenericPtr promote(const RegisterStatePtr &from) {
         RegisterStateGenericPtr retval = boost::dynamic_pointer_cast<RegisterStateGeneric>(from);
-        assert(retval!=NULL);
+        ASSERT_not_null(retval);
         return retval;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Methods we inherit
 public:
-    virtual void clear() /*override*/;
-    virtual void zero() /*override*/;
-    virtual SValuePtr readRegister(const RegisterDescriptor &reg, RiscOperators *ops) /*override*/;
-    virtual void writeRegister(const RegisterDescriptor &reg, const SValuePtr &value, RiscOperators *ops) /*override*/;
-    virtual void print(std::ostream&, Formatter&) const /*override*/;
+    virtual void clear() ROSE_OVERRIDE;
+    virtual void zero() ROSE_OVERRIDE;
+    virtual SValuePtr readRegister(const RegisterDescriptor &reg, RiscOperators *ops) ROSE_OVERRIDE;
+    virtual void writeRegister(const RegisterDescriptor &reg, const SValuePtr &value, RiscOperators *ops) ROSE_OVERRIDE;
+    virtual void print(std::ostream&, Formatter&) const ROSE_OVERRIDE;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Methods first defined at this level of the class hierarchy
@@ -1101,6 +917,35 @@ public:
      *  clear_latest_writer()), or no data has ever been written to the register, or data has been written but no writer was
      *  specified. */
     virtual std::set<rose_addr_t> get_latest_writers(const RegisterDescriptor&) const;
+
+    /** Whether reading modifies representation.  When the @ref readRegister method is called to obtain a value for a desired
+     *  register that overlaps with some (parts of) registers that already exist in this register state we can proceed in two
+     *  ways. In both cases the return value will include data that's already stored, but the difference is in how we store the
+     *  returned value in the register state: (1) we can erase the (parts of) existing registers that overlap and store the
+     *  desired register and store the returned value so that the register we just read appears as one atomic value, or (2) we
+     *  can keep the existing registers and write only those parts of the return value that fall between the gaps.
+     *
+     *  If the coalesceOnRead property is set, then the returned value is stored atomically even when the value might be a
+     *  function of values that are already stored. Otherwise, existing registerss are not rearranged and only those parts of
+     *  the return value that fall into the gaps between existing registers are stored.
+     *
+     *  The set/clear modifiers return the previous value of this property.
+     *
+     * @{ */
+    virtual bool get_coalesceOnRead() { return coalesceOnRead; }
+    virtual bool set_coalesceOnRead(bool b=true) { bool retval=coalesceOnRead; coalesceOnRead=b; return retval; }
+    virtual bool clear_coalescOnRead() { return set_coalesceOnRead(false); }
+    /** @} */
+
+    /** Temporarily turn off coalescing on read.  Original state is restored by the destructor. */
+    class NoCoalesceOnRead {
+        RegisterStateGeneric *rstate_;
+        bool oldValue_;
+    public:
+        /** Turn off coalesceOnRead for the specified register state. */
+        explicit NoCoalesceOnRead(RegisterStateGeneric *rstate): rstate_(rstate), oldValue_(rstate->clear_coalescOnRead()) {}
+        ~NoCoalesceOnRead() { rstate_->set_coalesceOnRead(oldValue_); }
+    };
     
 protected:
     void deep_copy_values();
@@ -1124,11 +969,16 @@ public:
     static const size_t n_gprs = 8;             /**< Number of general-purpose registers in this state. */
     static const size_t n_segregs = 6;          /**< Number of segmentation registers in this state. */
     static const size_t n_flags = 32;           /**< Number of flag registers in this state. */
+    static const size_t n_st = 8;               /**< Number of ST registers (not counting _st_top pseudo register). */
+    static const size_t n_xmm = 8;              /**< Number f XMM registers. */
 
     SValuePtr ip;                               /**< Instruction pointer. */
     SValuePtr gpr[n_gprs];                      /**< General-purpose registers */
     SValuePtr segreg[n_segregs];                /**< Segmentation registers. */
     SValuePtr flag[n_flags];                    /**< Control/status flags (i.e., FLAG register). */
+    SValuePtr st[n_st];                         /**< Floating point circular stack. */
+    SValuePtr fpstatus;                         /**< Floating-point status word. */
+    SValuePtr xmm[n_xmm];                       /**< XMM registers. */
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Real constructors
@@ -1145,6 +995,11 @@ protected:
             segreg[i] = other.segreg[i]->copy();
         for (size_t i=0; i<n_flags; ++i)
             flag[i] = other.flag[i]->copy();
+        for (size_t i=0; i<n_st; ++i)
+            st[i] = other.st[i]->copy();
+        fpstatus = other.fpstatus;
+        for (size_t i=0; i<n_xmm; ++i)
+            xmm[i] = other.xmm[i]->copy();
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1165,11 +1020,11 @@ public:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Virtual constructors
 public:
-    virtual RegisterStatePtr create(const SValuePtr &protoval, const RegisterDictionary *regdict) const /*override*/ {
+    virtual RegisterStatePtr create(const SValuePtr &protoval, const RegisterDictionary *regdict) const ROSE_OVERRIDE {
         return instance(protoval, regdict);
     }
 
-    virtual RegisterStatePtr clone() const /*override*/ {
+    virtual RegisterStatePtr clone() const ROSE_OVERRIDE {
         return RegisterStatePtr(new RegisterStateX86(*this));
     }
 
@@ -1180,18 +1035,18 @@ public:
      *  will fail if @p from does not point to a RegisterStateX86 object. */
     static RegisterStateX86Ptr promote(const RegisterStatePtr &from) {
         RegisterStateX86Ptr retval = boost::dynamic_pointer_cast<RegisterStateX86>(from);
-        assert(retval!=NULL);
+        ASSERT_not_null(retval);
         return retval;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Methods we inherited
 public:
-    virtual void clear() /*override*/;
+    virtual void clear() ROSE_OVERRIDE;
     virtual void zero() /* override*/;
-    virtual SValuePtr readRegister(const RegisterDescriptor &reg, RiscOperators *ops) /*override*/;
-    virtual void writeRegister(const RegisterDescriptor &reg, const SValuePtr &value, RiscOperators *ops) /*override*/;
-    virtual void print(std::ostream&, Formatter&) const /*override*/;
+    virtual SValuePtr readRegister(const RegisterDescriptor &reg, RiscOperators *ops) ROSE_OVERRIDE;
+    virtual void writeRegister(const RegisterDescriptor &reg, const SValuePtr &value, RiscOperators *ops) ROSE_OVERRIDE;
+    virtual void print(std::ostream&, Formatter&) const ROSE_OVERRIDE;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Methods first declared at this level of the class hierarchy
@@ -1201,12 +1056,21 @@ protected:
     virtual SValuePtr readRegisterFlag(const RegisterDescriptor &reg, RiscOperators *ops);
     virtual SValuePtr readRegisterSeg(const RegisterDescriptor &reg, RiscOperators *ops);
     virtual SValuePtr readRegisterIp(const RegisterDescriptor &reg, RiscOperators *ops);
+    virtual SValuePtr readRegisterSt(const RegisterDescriptor &reg, RiscOperators *ops);
+    virtual SValuePtr readRegisterXmm(const RegisterDescriptor &reg, RiscOperators *ops);
+    virtual SValuePtr readRegisterFpStatus(const RegisterDescriptor &reg, RiscOperators *ops);
 
     // helpers for writeRegister()
     virtual void writeRegisterGpr(const RegisterDescriptor &reg, const SValuePtr &value, RiscOperators *ops);
     virtual void writeRegisterFlag(const RegisterDescriptor &reg, const SValuePtr &value, RiscOperators *ops);
     virtual void writeRegisterSeg(const RegisterDescriptor &reg, const SValuePtr &value, RiscOperators *ops);
     virtual void writeRegisterIp(const RegisterDescriptor &reg, const SValuePtr &value, RiscOperators *ops);
+    virtual void writeRegisterSt(const RegisterDescriptor &reg, const SValuePtr &value, RiscOperators *ops);
+    virtual void writeRegisterXmm(const RegisterDescriptor &reg, const SValuePtr &value, RiscOperators *ops);
+    virtual void writeRegisterFpStatus(const RegisterDescriptor &reg, const SValuePtr &value, RiscOperators *ops);
+
+    // Generate a name for initial values.
+    virtual std::string initialValueName(const RegisterDescriptor&) const;
 };
 
 
@@ -1218,18 +1082,24 @@ protected:
 typedef boost::shared_ptr<class MemoryState> MemoryStatePtr;
 
 /** Represents all memory in the state. MemoryState objects are allocated on the heap and reference counted.  The
- *  BaseSemantics::MemoryState is an abstract class that defines the interface.  See the BinaryAnalysis::InstructionSemantics2
- *  namespace for an overview of how the parts fit together.*/
+ *  BaseSemantics::MemoryState is an abstract class that defines the interface.  See the
+ *  rose::BinaryAnalysis::InstructionSemantics2 namespace for an overview of how the parts fit together.*/
 class MemoryState: public boost::enable_shared_from_this<MemoryState> {
-protected:
-    SValuePtr protoval;                         /**< Prototypical value. */
+    SValuePtr addrProtoval_;                            /**< Prototypical value for addresses. */
+    SValuePtr valProtoval_;                             /**< Prototypical value for values. */
+    ByteOrder::Endianness byteOrder_;                   /**< Memory byte order. */
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Real constructors
 protected:
-    explicit MemoryState(const SValuePtr &protoval): protoval(protoval) {
-        assert(protoval!=NULL);
+    explicit MemoryState(const SValuePtr &addrProtoval, const SValuePtr &valProtoval)
+        : addrProtoval_(addrProtoval), valProtoval_(valProtoval), byteOrder_(ByteOrder::ORDER_UNSPECIFIED) {
+        ASSERT_not_null(addrProtoval);
+        ASSERT_not_null(valProtoval);
     }
+
+    MemoryState(const MemoryStatePtr &other)
+        : addrProtoval_(other->addrProtoval_), valProtoval_(other->valProtoval_), byteOrder_(ByteOrder::ORDER_UNSPECIFIED) {}
 
 public:
     virtual ~MemoryState() {}
@@ -1244,8 +1114,9 @@ public:
      *
      *  Allocates and constructs a new MemoryState object having the same dynamic type as this object. A prototypical SValue
      *  must be supplied and will be used to construct any additional SValue objects needed during the operation of a
-     *  MemoryState. */
-    virtual MemoryStatePtr create(const SValuePtr &protoval) const = 0;
+     *  MemoryState.  Two prototypical values are supplied, one for addresses and another for values stored at those addresses,
+     *  although they will almost always be the same. */
+    virtual MemoryStatePtr create(const SValuePtr &addrProtoval, const SValuePtr &valProtoval) const = 0;
 
     /** Virtual allocating copy constructor. Creates a new MemoryState object which is a copy of this object. */
     virtual MemoryStatePtr clone() const = 0;
@@ -1254,18 +1125,29 @@ public:
     // Dynamic pointer casts.  No-op since this is the base class.
 public:
     static MemoryStatePtr promote(const MemoryStatePtr &x) {
-        assert(x!=NULL);
+        ASSERT_not_null(x);
         return x;
     }
     
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Methods first declared at this level of the class hierarchy
 public:
-    /** Return the protoval.  The protoval is used to construct other values via its virtual constructors. */
-    SValuePtr get_protoval() const { return protoval; }
+    /** Return the address protoval.  The address protoval is used to construct other memory addresses via its virtual
+     *  constructors. */
+    SValuePtr get_addr_protoval() const { return addrProtoval_; }
+
+    /** Return the value protoval.  The value protoval is used to construct other stored values via its virtual
+     *  constructors. */
+    SValuePtr get_val_protoval() const { return valProtoval_; }
 
     /** Clear memory. Removes all memory cells from this memory state. */
     virtual void clear() = 0;
+
+    /** Memory byte order.
+     *  @{ */
+    ByteOrder::Endianness get_byteOrder() const { return byteOrder_; }
+    void set_byteOrder(ByteOrder::Endianness bo) { byteOrder_ = bo; }
+    /** @} */
 
     /** Read a value from memory.
      *
@@ -1280,12 +1162,14 @@ public:
      *  memory state that stores only bytes.  A RiscOperators object is provided for use in these situations.
      *
      *  In order to support cases where an address does not match any existing location, the @p dflt value can be used to
-     *  initialize a new memory location.  The manner in which the default is used depends on the implementation.
+     *  initialize a new memory location.  The manner in which the default is used depends on the implementation.  In any case,
+     *  the width of the @p dflt value determines how much to read.
      *
      *  Footnote 1: A MemoryState::readMemory() call is the last in a sequence of delegations starting with
      *  RiscOperators::readMemory().  The designers of the MemoryState, State, and RiscOperators subclasses will need to
      *  coordinate to decide which layer should handle concatenating values from individual memory locations. */
-    virtual SValuePtr readMemory(const SValuePtr &address, const SValuePtr &dflt, size_t nbits, RiscOperators *ops) = 0;
+    virtual SValuePtr readMemory(const SValuePtr &address, const SValuePtr &dflt,
+                                 RiscOperators *addrOps, RiscOperators *valOps) = 0;
 
     /** Write a value to memory.
      *
@@ -1296,7 +1180,8 @@ public:
      *  A MemoryState::writeMemory() call is the last in a sequence of delegations starting with
      *  RiscOperators::writeMemory(). The designers of the MemoryState, State, and RiscOperators will need to coordinate to
      *  decide which layer (if any) should handle splitting a multi-byte value into multiple memory locations. */
-    virtual void writeMemory(const SValuePtr &addr, const SValuePtr &value, RiscOperators *ops) = 0;
+    virtual void writeMemory(const SValuePtr &addr, const SValuePtr &value,
+                             RiscOperators *addrOps, RiscOperators *valOps) = 0;
 
     /** Print a memory state to more than one line of output.
      * @{ */
@@ -1342,23 +1227,24 @@ typedef boost::shared_ptr<class MemoryCell> MemoryCellPtr;
  *  state. */
 class MemoryCell: public boost::enable_shared_from_this<MemoryCell> {
 protected:
-    SValuePtr address;                          /**< Address of memory cell. */
-    SValuePtr value;                            /**< Value stored at that address. */
-    boost::optional<rose_addr_t> latest_writer;   /**< Optional address for most recent writer of this cell's value. */
+    SValuePtr address;                                  /**< Address of memory cell. */
+    SValuePtr value;                                    /**< Value stored at that address. */
+    boost::optional<rose_addr_t> latest_writer;         /**< Optional address for most recent writer of this cell's value. */
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Real constructors
 protected:
     MemoryCell(const SValuePtr &address, const SValuePtr &value)
         : address(address), value(value) {
-        assert(address!=NULL);
-        assert(value!=NULL);
+        ASSERT_not_null(address);
+        ASSERT_not_null(value);
     }
 
     // deep-copy cell list so modifying this new one doesn't alter the existing one
     MemoryCell(const MemoryCell &other) {
         address = other.address->copy();
-        value = other.address->copy();
+        value = other.value->copy();
+        latest_writer = other.latest_writer;
     }
 
 public:
@@ -1394,7 +1280,7 @@ public:
     // Dynamic pointer casts. No-op since this is the base class.
 public:
     static MemoryCellPtr promote(const MemoryCellPtr &x) {
-        assert(x!=NULL);
+        ASSERT_not_null(x);
         return x;
     }
     
@@ -1405,7 +1291,7 @@ public:
      * @{ */
     virtual SValuePtr get_address() const { return address; }
     virtual void set_address(const SValuePtr &addr) {
-        assert(addr!=NULL);
+        ASSERT_not_null(addr);
         address = addr;
     }
     /** @}*/
@@ -1414,7 +1300,7 @@ public:
      * @{ */
     virtual SValuePtr get_value() const { return value; }
     virtual void set_value(const SValuePtr &v) {
-        assert(v!=NULL);
+        ASSERT_not_null(v);
         value = v;
     }
     /** @}*/
@@ -1430,12 +1316,12 @@ public:
     /** Determines whether two memory cells can alias one another.  Two cells may alias one another if it is possible that
      *  their addresses cause them to overlap.  For cells containing one-byte values, aliasing may occur if their two addresses
      *  may be equal; multi-byte cells will need to check ranges of addresses. */
-    virtual bool may_alias(const MemoryCellPtr &other, RiscOperators *ops) const;
+    virtual bool may_alias(const MemoryCellPtr &other, RiscOperators *addrOps) const;
 
     /** Determines whether two memory cells must alias one another.  Two cells must alias one another when it can be proven
      * that their addresses cause them to overlap.  For cells containing one-byte values, aliasing must occur unless their
      * addresses can be different; multi-byte cells will need to check ranges of addresses. */
-    virtual bool must_alias(const MemoryCellPtr &other, RiscOperators *ops) const;
+    virtual bool must_alias(const MemoryCellPtr &other, RiscOperators *addrOps) const;
     
     /** Print the memory cell on a single line.
      * @{ */
@@ -1500,13 +1386,19 @@ protected:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Real constructors
 protected:
-    MemoryCellList(const MemoryCellPtr &protocell, const SValuePtr &protoval)
-        : MemoryState(protoval), protocell(protocell), byte_restricted(true) {
-        assert(protocell!=NULL);
+    explicit MemoryCellList(const MemoryCellPtr &protocell)
+        : MemoryState(protocell->get_address(), protocell->get_value()),
+          protocell(protocell),
+          byte_restricted(true) {
+        ASSERT_not_null(protocell);
+        ASSERT_not_null(protocell->get_address());
+        ASSERT_not_null(protocell->get_value());
     }
 
-    explicit MemoryCellList(const SValuePtr &protoval)
-        : MemoryState(protoval), protocell(MemoryCell::instance(protoval, protoval)), byte_restricted(true) {}
+    MemoryCellList(const SValuePtr &addrProtoval, const SValuePtr &valProtoval)
+        : MemoryState(addrProtoval, valProtoval),
+          protocell(MemoryCell::instance(addrProtoval, valProtoval)),
+          byte_restricted(true) {}
 
     // deep-copy cell list so that modifying this new state does not modify the existing state
     MemoryCellList(const MemoryCellList &other)
@@ -1519,14 +1411,15 @@ protected:
     // Static allocating constructors
 public:
     /** Instantiate a new prototypical memory state. This constructor uses the default type for the cell type (based on the
-     *  semantic domain). */
-    static MemoryCellListPtr instance(const SValuePtr &protoval) {
-        return MemoryCellListPtr(new MemoryCellList(protoval));
+     *  semantic domain). The prototypical values are usually the same (addresses and stored values are normally the same
+     *  type). */
+    static MemoryCellListPtr instance(const SValuePtr &addrProtoval, const SValuePtr &valProtoval) {
+        return MemoryCellListPtr(new MemoryCellList(addrProtoval, valProtoval));
     }
     
-    /** Instantiate a new memory state with prototypical memory cell and values. */
-    static MemoryCellListPtr instance(const MemoryCellPtr &protocell, const SValuePtr &protoval) {
-        return MemoryCellListPtr(new MemoryCellList(protocell, protoval));
+    /** Instantiate a new memory state with prototypical memory cell. */
+    static MemoryCellListPtr instance(const MemoryCellPtr &protocell) {
+        return MemoryCellListPtr(new MemoryCellList(protocell));
     }
 
     /** Instantiate a new copy of an existing memory state. */
@@ -1538,16 +1431,16 @@ public:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Virtual constructors
 public:
-    virtual MemoryStatePtr create(const SValuePtr &protoval) const /*override*/ {
-        return instance(protoval);
+    virtual MemoryStatePtr create(const SValuePtr &addrProtoval, const SValuePtr &valProtoval) const ROSE_OVERRIDE {
+        return instance(addrProtoval, valProtoval);
     }
     
     /** Virtual allocating constructor. */
-    virtual MemoryStatePtr create(const MemoryCellPtr &protocell, const SValuePtr &protoval) const {
-        return instance(protocell, protoval);
+    virtual MemoryStatePtr create(const MemoryCellPtr &protocell) const {
+        return instance(protocell);
     }
 
-    virtual MemoryStatePtr clone() const /*override*/ {
+    virtual MemoryStatePtr clone() const ROSE_OVERRIDE {
         return MemoryStatePtr(new MemoryCellList(*this));
     }
 
@@ -1558,14 +1451,14 @@ public:
      *  a BaseSemantics::MemoryCellList dynamic type. */
     static MemoryCellListPtr promote(const BaseSemantics::MemoryStatePtr &m) {
         MemoryCellListPtr retval = boost::dynamic_pointer_cast<MemoryCellList>(m);
-        assert(retval!=NULL);
+        ASSERT_not_null(retval);
         return retval;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Methods we inherited
 public:
-    virtual void clear() /*override*/ {
+    virtual void clear() ROSE_OVERRIDE {
         cells.clear();
         latest_written_cell.reset();
     }
@@ -1578,8 +1471,10 @@ public:
      *  the end of the list, then @p dflt becomes the return value, otherwise the return value is the single value on the
      *  accumulated list. If the @p dflt value is returned, then it is also pushed onto the front of the cell list.
      *
-     *  The base implementation assumes that all cells contain 8-bit values. */
-    virtual SValuePtr readMemory(const SValuePtr &address, const SValuePtr &dflt, size_t nbits, RiscOperators *ops) /*override*/;
+     *  The width of the @p dflt value determines how much data is read. The base implementation assumes that all cells contain
+     *  8-bit values. */
+    virtual SValuePtr readMemory(const SValuePtr &address, const SValuePtr &dflt,
+                                 RiscOperators *addrOps, RiscOperators *valOps) ROSE_OVERRIDE;
 
     /** Write a value to memory.
      *
@@ -1587,9 +1482,10 @@ public:
      *  the front of the cell list.
      *
      *  The base implementation assumes that all cells contain 8-bit values. */
-    virtual void writeMemory(const SValuePtr &addr, const SValuePtr &value, RiscOperators *ops) /*override*/;
+    virtual void writeMemory(const SValuePtr &addr, const SValuePtr &value,
+                             RiscOperators *addrOps, RiscOperators *valOps) ROSE_OVERRIDE;
 
-    virtual void print(std::ostream&, Formatter&) const /*override*/;
+    virtual void print(std::ostream&, Formatter&) const ROSE_OVERRIDE;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Methods first declared at this level of the class hierarchy
@@ -1607,7 +1503,7 @@ public:
      *  beginning of the list (which is normally stored in reverse chronological order) and continues until it reaches either
      *  the end, or a cell that must alias the specified address. If the last cell in the returned list must alias the
      *  specified address, then true is returned via @p short_circuited argument. */
-    virtual CellList scan(const BaseSemantics::SValuePtr &address, size_t nbits, RiscOperators *ops,
+    virtual CellList scan(const BaseSemantics::SValuePtr &address, size_t nbits, RiscOperators *addrOps, RiscOperators *valOps,
                           bool &short_circuited/*out*/) const;
 
     /** Visitor for traversing a cell list. */
@@ -1630,7 +1526,8 @@ public:
     virtual MemoryCellPtr get_latest_written_cell() const { return latest_written_cell; }
 
     /** Returns the union of writer virtual addresses for cells that may alias the given address. */
-    virtual std::set<rose_addr_t> get_latest_writers(const SValuePtr &addr, size_t nbits, RiscOperators *ops);
+    virtual std::set<rose_addr_t> get_latest_writers(const SValuePtr &addr, size_t nbits,
+                                                     RiscOperators *addrOps, RiscOperators *valOps);
 };
 
 /******************************************************************************************************************
@@ -1650,7 +1547,8 @@ typedef boost::shared_ptr<class State> StatePtr;
  *  vertex.
  *
  *  State objects are allocated on the heap and reference counted.  The BaseSemantics::State is an abstract class that defines
- *  the interface.  See the BinaryAnalysis::InstructionSemantics2 namespace for an overview of how the parts fit together.  */
+ *  the interface.  See the rose::BinaryAnalysis::InstructionSemantics2 namespace for an overview of how the parts fit
+ *  together.  */
 class State: public boost::enable_shared_from_this<State> {
 protected:
     SValuePtr protoval;                         /**< Initial value used to create additional values as needed. */
@@ -1662,10 +1560,10 @@ protected:
 protected:
     State(const RegisterStatePtr &registers, const MemoryStatePtr &memory)
         : registers(registers), memory(memory) {
-        assert(registers!=NULL);
-        assert(memory!=NULL);
+        ASSERT_not_null(registers);
+        ASSERT_not_null(memory);
         protoval = registers->get_protoval();
-        assert(protoval!=NULL);
+        ASSERT_not_null(protoval);
     }
 
     // deep-copy the registers and memory
@@ -1711,7 +1609,7 @@ public:
     // Dynamic pointer casts.  No-op since this is the base class.
 public:
     static StatePtr promote(const StatePtr &x) {
-        assert(x!=NULL);
+        ASSERT_not_null(x);
         return x;
     }
     
@@ -1767,16 +1665,18 @@ public:
      *
      *  The BaseSemantics::readMemory() implementation simply delegates to the memory state member of this state. See
      *  BaseSemantics::RiscOperators::readMemory() for details.  */
-    virtual SValuePtr readMemory(const SValuePtr &address, const SValuePtr &dflt, size_t nbits, RiscOperators *ops) {
-        return memory->readMemory(address, dflt, nbits, ops);
+    virtual SValuePtr readMemory(const SValuePtr &address, const SValuePtr &dflt,
+                                 RiscOperators *addrOps, RiscOperators *valOps) {
+        return memory->readMemory(address, dflt, addrOps, valOps);
     }
 
     /** Write a value to memory.
      *
      *  The BaseSemantics::writeMemory() implementation simply delegates to the memory state member of this state. See
      *  BaseSemantics::RiscOperators::writeMemory() for details. */
-    virtual void writeMemory(const SValuePtr &addr, const SValuePtr &value, RiscOperators *ops) {
-        memory->writeMemory(addr, value, ops);
+    virtual void writeMemory(const SValuePtr &addr, const SValuePtr &value,
+                             RiscOperators *addrOps, RiscOperators *valOps) {
+        memory->writeMemory(addr, value, addrOps, valOps);
     }
 
     /** Print the register contents. This emits one line per register and contains the register name and its value.
@@ -1851,8 +1751,8 @@ typedef boost::shared_ptr<class RiscOperators> RiscOperatorsPtr;
  *  vectors. Operators extract(), unsignedExtend(), signExtend(), readRegister(), and readMemory() fall into this category.
  *
  *  RiscOperator objects are allocated on the heap and reference counted.  The BaseSemantics::RiscOperator is an abstract class
- *  that defines the interface.  See the BinaryAnalysis::InstructionSemantics2 namespace for an overview of how the parts fit
- *  together. */
+ *  that defines the interface.  See the rose::BinaryAnalysis::InstructionSemantics2 namespace for an overview of how the parts
+ *  fit together. */
 class RiscOperators: public boost::enable_shared_from_this<RiscOperators> {
 protected:
     SValuePtr protoval;                         /**< Prototypical value used for its virtual constructors. */
@@ -1867,12 +1767,12 @@ protected:
 protected:
     explicit RiscOperators(const SValuePtr &protoval, SMTSolver *solver=NULL)
         : protoval(protoval), cur_insn(NULL), ninsns(0), solver(solver) {
-        assert(protoval!=NULL);
+        ASSERT_not_null(protoval);
     }
 
     explicit RiscOperators(const StatePtr &state, SMTSolver *solver=NULL)
         : state(state), cur_insn(NULL), ninsns(0), solver(solver) {
-        assert(state!=NULL);
+        ASSERT_not_null(state);
         protoval = state->get_protoval();
     }
 
@@ -1901,7 +1801,7 @@ public:
     // Dynamic pointer casts.  No-op since this is the base class.
 public:
     static RiscOperatorsPtr promote(const RiscOperatorsPtr &x) {
-        assert(x!=NULL);
+        ASSERT_not_null(x);
         return x;
     }
     
@@ -1927,7 +1827,7 @@ public:
      *  state has no effect on this object's prototypical value which was initialized by the constructor; new states should
      *  have a prototyipcal value of the same dynamic type.
      * @{ */
-    virtual StatePtr get_state() { return state; }
+    virtual StatePtr get_state() const { return state; }
     virtual void set_state(const StatePtr &s) { state = s; }
     /** @} */
 
@@ -1988,7 +1888,7 @@ public:
     /** Called at the beginning of every instruction.  This method is invoked every time the translation object begins
      *  processing an instruction.  Some policies use this to update a pointer to the current instruction. */
     virtual void startInstruction(SgAsmInstruction *insn) {
-        assert(insn!=NULL);
+        ASSERT_not_null(insn);
         cur_insn = insn;
         ++ninsns;
     };
@@ -1996,8 +1896,8 @@ public:
     /** Called at the end of every instruction.  This method is invoked whenever the translation object ends processing for an
      *  instruction.  This is not called if there's an exception during processing. */
     virtual void finishInstruction(SgAsmInstruction *insn) {
-        assert(insn);
-        assert(cur_insn==insn);
+        ASSERT_not_null(insn);
+        ASSERT_require(cur_insn==insn);
         cur_insn = NULL;
     };
 
@@ -2213,7 +2113,7 @@ public:
      *  which layer should invoke the extract() or concat() (or whatever other RISC operations might be necessary).
      */ 
     virtual SValuePtr readRegister(const RegisterDescriptor &reg) {
-        assert(state!=NULL);
+        ASSERT_not_null(state);
         return state->readRegister(reg, this);
     }
 
@@ -2226,7 +2126,7 @@ public:
      *  writing a value to the specified register when the underlying register state doesn't actually store a value for that
      *  specific register. The RiscOperations object is passed along for that purpose.  See readRegister() for more details. */
     virtual void writeRegister(const RegisterDescriptor &reg, const SValuePtr &a) {
-        assert(state!=NULL);
+        ASSERT_not_null(state);
         state->writeRegister(reg, a, this);
     }
 
@@ -2247,10 +2147,12 @@ public:
      *  pass a default-constructed register descriptor whose is_valid() method returns false.
      *
      *  The @p cond argument is a Boolean value that indicates whether this is a true read operation. If @p cond can be proven
-     *  to be false then the read is a no-op and returns an arbitrary value. */
-    virtual SValuePtr readMemory(const RegisterDescriptor &segreg, const SValuePtr &addr, const SValuePtr &cond,
-                                 size_t nbits) = 0;
-
+     *  to be false then the read is a no-op and returns an arbitrary value.
+     *
+     *  The @p dflt argument determines the size of the value to be read. This argument is also passed along to the lower
+     *  layers so that they can, if they desire, use it to initialize memory that has never been read or written before. */
+    virtual SValuePtr readMemory(const RegisterDescriptor &segreg, const SValuePtr &addr, const SValuePtr &dflt,
+                                 const SValuePtr &cond) = 0;
 
     /** Writes a value to memory.
      *
@@ -2288,30 +2190,36 @@ public:
  *
  *  Each dispatcher contains a table indexed by the machine instruction "kind" (e.g., SgAsmMipsInstruction::get_kind()). The
  *  table stores functors derived from the abstract InsnProcessor class.  (FIXME: The functors are not currently reference
- *  counted [Robb Matzke 2013-03-04])
+ *  counted; they are owned by the dispatcher and deleted when the dispatcher is destroyed. [Robb Matzke 2013-03-04])
  *
  *  Dispatcher objects are allocated on the heap and reference counted.  The BaseSemantics::Dispatcher is an abstract class
- *  that defines the interface.  See the BinaryAnalysis::InstructionSemantics2 namespace for an overview of how the parts fit
- *  together. */
+ *  that defines the interface.  See the rose::BinaryAnalysis::InstructionSemantics2 namespace for an overview of how the parts
+ *  fit together. */
 class Dispatcher: public boost::enable_shared_from_this<Dispatcher> {
 protected:
     RiscOperatorsPtr operators;
     const RegisterDictionary *regdict;          /**< See set_register_dictionary(). */
 
     // Dispatchers keep a table of all the kinds of instructions they can handle.  The lookup key is typically some sort of
-    // instruction identifier, such as from SgAsmx86Instruction::get_kind(), and comes from the iproc_key() virtual method.
+    // instruction identifier, such as from SgAsmX86Instruction::get_kind(), and comes from the iproc_key() virtual method.
     typedef std::vector<InsnProcessor*> InsnProcessors;
     InsnProcessors iproc_table;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Real constructors
 protected:
+    // Prototypical constructor
+    Dispatcher(): regdict(NULL) {}
+
     explicit Dispatcher(const RiscOperatorsPtr &ops): operators(ops), regdict(NULL) {
-        assert(operators!=NULL);
+        ASSERT_not_null(operators);
     }
 
 public:
-    virtual ~Dispatcher() {}
+    virtual ~Dispatcher() {
+        for (InsnProcessors::iterator iter=iproc_table.begin(); iter!=iproc_table.end(); ++iter)
+            delete *iter;
+    }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Static allocating constructors. None since this is an abstract class
@@ -2346,7 +2254,9 @@ protected:
     /** Given an instruction, return the InsnProcessor key that can be used as an index into the iproc_table. */
     virtual int iproc_key(SgAsmInstruction*) const = 0;
 
-    /** Set an iproc table entry to the specified value. */
+    /** Set an iproc table entry to the specified value.
+     *
+     *  The @p iproc object will become owned by this dispatcher and deleted when this dispatcher is destroyed. */
     virtual void iproc_set(int key, InsnProcessor *iproc);
 
     /** Obtain an iproc table entry for the specified key. */
@@ -2399,8 +2309,9 @@ public:
 
     /** Lookup a register by name.  This dispatcher's register dictionary is consulted and the specified register is located by
      *  name.  If a bit width is specified (@p nbits) then it must match the size of register that was found.  If a valid
-     *  register cannot be found then an exception is thrown. */
-    virtual const RegisterDescriptor& findRegister(const std::string &regname, size_t nbits=0);
+     *  register cannot be found then either an exception is thrown or an invalid register is returned depending on whether
+     *  @p allowMissing is false or true, respectively. */
+    virtual const RegisterDescriptor& findRegister(const std::string &regname, size_t nbits=0, bool allowMissing=false);
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Miscellaneous methods that tend to be the same for most dispatchers
@@ -2409,6 +2320,16 @@ public:
      *  segment registers (they have a flat virtual address space), in which case the returned register descriptor's is_valid()
      *  method returns false. */
     virtual RegisterDescriptor segmentRegister(SgAsmMemoryReferenceExpression*);
+
+    /** Increment all auto-increment registers in the expression.  This method traverses the expression and increments each
+     *  the register of each register reference expression that has a positive adjustment value.  If the same register is
+     *  encountered multiple times then it is incremented multiple times. */
+    virtual void incrementRegisters(SgAsmExpression*);
+
+    /** Decrement all auto-decrement registers in the expression.  This method traverses the expression and increments each
+     *  the register of each register reference expression that has a negative adjustment value.  If the same register is
+     *  encountered multiple times then it is decremented multiple times. */
+    virtual void decrementRegisters(SgAsmExpression*);
 
     /** Returns a memory address by evaluating the address expression.  The address expression can be either a constant or an
      *  expression containing operators and constants.  If @p nbits is non-zero then the result is sign extended or truncated
@@ -2445,7 +2366,9 @@ std::ostream& operator<<(std::ostream&, const State::WithFormatter&);
 std::ostream& operator<<(std::ostream&, const RiscOperators&);
 std::ostream& operator<<(std::ostream&, const RiscOperators::WithFormatter&);
 
-} /*namespace*/
-} /*namespace*/
-} /*namespace*/
+} // namespace
+} // namespace
+} // namespace
+} // namespace
+
 #endif

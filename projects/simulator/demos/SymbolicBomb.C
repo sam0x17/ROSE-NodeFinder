@@ -18,6 +18,9 @@
 #include "InsnSemanticsExpr.h"
 #include "threadSupport.h"
 
+using namespace rose;
+using namespace rose::BinaryAnalysis;
+
 // Everything about detecting symbolic complexity is encapsulated in this single class.  The class' instruction callback is
 // invoked for each instruction and when it hits the @p when address an analysis is triggered (only once, and only by the first
 // thread to reach the address).  The analysis disassembles the entire process memory and then analyzes each function
@@ -106,7 +109,7 @@ public:
         eip.set_subvalue(SP_VMS, policy.get_policy(SP_VMS).number<32>(func->get_entry_va()));
         eip.set_subvalue(SP_SYM, policy.get_policy(SP_SYM).number<32>(func->get_entry_va()));
         policy.writeRegister(decoder.REG_EIP, eip);
-        std::vector<SgAsmx86Instruction*> execution_path;
+        std::vector<SgAsmX86Instruction*> execution_path;
 
         try {
             while (true) {
@@ -118,7 +121,7 @@ public:
                     m->more("%s:   unknown eip: %s\n", cb_name, ss.str().c_str());
                     break;
                 }
-                SgAsmx86Instruction *insn = isSgAsmx86Instruction(proc->get_instruction(eip.get_subvalue(SP_VMS).known_value()));
+                SgAsmX86Instruction *insn = isSgAsmX86Instruction(proc->get_instruction(eip.get_subvalue(SP_VMS).known_value()));
                 if (!insn)
                     break;
 
@@ -155,17 +158,10 @@ public:
         }
     }
 
-    // Counts nodes in an expression tree
-    struct ExprNodeCounter: public InsnSemanticsExpr::Visitor {
-        size_t nnodes;
-        ExprNodeCounter(): nnodes(0) {}
-        virtual void operator()(const InsnSemanticsExpr::TreeNodePtr&) { ++nnodes; }
-    };
-
     // Calls the node counter for a particular value type.  T must be a MultiSemantic::ValueType<>.
     template<class T>
-    void symbolic_expr_complexity(const T &multival, ExprNodeCounter *visitor) {
-        multival.get_subvalue(SP_SYM).get_expression()->depth_first_visit(visitor);
+    size_t symbolic_expr_complexity(const T &multival) {
+        return multival.get_subvalue(SP_SYM).get_expression()->nnodes();
     }
 
     // Counts nodes across all registers.  Note that for x86, some registers have multiple names depending on the part of the
@@ -173,22 +169,22 @@ public:
     // physical registers multiple times.  That's fine, as long as we're consistent.
     size_t symbolic_state_complexity(MultiSemantics::Policy<MultiSemantics::State, MultiSemantics::ValueType> &policy) {
         const RegisterDictionary::Entries &regs = policy.get_register_dictionary()->get_registers();
-        ExprNodeCounter visitor;
+        size_t nnodes = 0;
         for (RegisterDictionary::Entries::const_iterator ri=regs.begin(); ri!=regs.end(); ++ri) {
             try {
                 const RegisterDescriptor &reg = ri->second;
                 switch (reg.get_nbits()) { // arghh!  side effect of using templates :-/
-                    case 1:  symbolic_expr_complexity(policy.readRegister<1>(reg),  &visitor); break;
-                    case 8:  symbolic_expr_complexity(policy.readRegister<8>(reg),  &visitor); break;
-                    case 16: symbolic_expr_complexity(policy.readRegister<16>(reg), &visitor); break;
-                    case 32: symbolic_expr_complexity(policy.readRegister<32>(reg), &visitor); break;
+                    case 1:  nnodes += symbolic_expr_complexity(policy.readRegister<1>(reg));  break;
+                    case 8:  nnodes += symbolic_expr_complexity(policy.readRegister<8>(reg));  break;
+                    case 16: nnodes += symbolic_expr_complexity(policy.readRegister<16>(reg)); break;
+                    case 32: nnodes += symbolic_expr_complexity(policy.readRegister<32>(reg)); break;
                     default: /*skip these registers*/                                          break;
                 }
             } catch (const MultiSemantics::Policy<MultiSemantics::State, MultiSemantics::ValueType>::Exception &e) {
                 // register is probably not implemented in the state object, so skip it
             }
         }
-        return visitor.nnodes;
+        return nnodes;
     }
 };
 

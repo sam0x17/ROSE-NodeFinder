@@ -30,10 +30,9 @@ class JavaTraversal implements Callable<Boolean> {
         ClassLoader.getSystemClassLoader().setDefaultAssertionStatus(true);
     }
 
-    static int verboseLevel = 0;
-
+    public static int verboseLevel = 0;
     static HashSet<String> processedFiles = new HashSet<String>();
-    static JavaParserSupport java_parser_support = null;
+    static JavaParserSupport javaParserSupport = null;
 
     // DQ (10/12/2010): Added boolean value to report error to C++ calling program (similar to OFP).
     // private static boolean hasErrorOccurred = false;
@@ -204,12 +203,12 @@ class JavaTraversal implements Callable<Boolean> {
                 if (a.compilationResult == null)
                     a.compilationResult = unitResult;
 /*
-System.out.println("ECJ error: " + a.getMessage());
-System.out.println("ECJ cause: " + a.getCause().getClass().getCanonicalName());
-StackTraceElement stack[] = a.getCause().getStackTrace();
-for (int k = 0; k < stack.length; k++) {
-    System.out.println(stack[k].toString());
-}
+                System.out.println("ECJ error: " + a.getMessage());
+                System.out.println("ECJ cause: " + a.getCause().getClass().getCanonicalName());
+                StackTraceElement stack[] = a.getCause().getStackTrace();
+                for (int k = 0; k < stack.length; k++) {
+                    System.out.println(stack[k].toString());
+                }
 */
                 throw a;
             }
@@ -231,6 +230,10 @@ for (int k = 0; k < stack.length; k++) {
      * @param args
      */
     static Main generateAst(String args[]) {
+        if (verboseLevel > 0) {
+            System.out.println("[INFO] ECJ::generateAst arguments=" + Arrays.toString(args));
+        }
+
         Main main = new Main(new PrintWriter(System.out), new PrintWriter(System.out), true/*systemExit*/, null/*options*/, null/*progress*/);
 
         // This is the last message printed to the console ...
@@ -276,14 +279,13 @@ for (int k = 0; k < stack.length; k++) {
         int maxUnits = sourceUnits.length;
         main.batchCompiler.totalUnits = 0;
         main.batchCompiler.unitsToProcess = new CompilationUnitDeclaration[maxUnits];
-
         internalBeginToCompile(main.batchCompiler, sourceUnits, maxUnits);
 
         return main;
     }
 
-    // TODO: Remove this !
-    static int totalUnits = 0;
+    static int totalCompilationUnitsProcessed = 0;
+
     static Runtime runtime = Runtime.getRuntime();
     static long r1, r2, f1, f2;
 
@@ -303,23 +305,22 @@ for (int k = 0; k < stack.length; k++) {
             System.out.println();
             System.out.println("**** In this iteration, the following " + (size == 1 ? "unit was" : (size + " units were")) + " processed:");
             System.out.println();
-        }
 
-        for (CompilationUnitDeclaration unit : units) {
-            System.out.println("   " + new String(unit.getFileName()));
-        }
+            for (CompilationUnitDeclaration unit : units) {
+                System.out.println("   " + new String(unit.getFileName()));
+            }
 
-        if (verboseLevel > 0) {
             System.out.println();
             System.out.println("**** Initial Max Memory:          \t " + r1 + ", used: " + (r1 - f1));
             System.out.println("**** After Compilation Max Memory:\t " + r2 + ", used: " + (r2 - f2));
-            System.out.println("**** Total Number of Units Processed: " + totalUnits);
+            System.out.println("**** Total Number of Units Processed: " + totalCompilationUnitsProcessed);
             System.out.println();
         }
     }
 
     // This is the "main" function called from the outside (via the JVM from ROSE).
     public static void main(String args[]) {
+        System.out.println("[INFO] ECJ::main arguments=" + Arrays.toString(args));
         /* tps : set up and configure ---------------------------------------------- */
 
         startJava();
@@ -359,6 +360,7 @@ for (int k = 0; k < stack.length; k++) {
             // maxUnits. To iterate over all units, including the ones that are pulled
             // in by closure, iterate up to batchCompiler.totalUnits.
             //
+            System.out.println("[INFO] ECJ::batchCompiler.totalUnits=" + batchCompiler.totalUnits);
             for (int i = 0; i < /* maxUnits */ batchCompiler.totalUnits; i++) {
                 CompilationUnitDeclaration unit = batchCompiler.unitsToProcess[i];
                 assert (unit != null);
@@ -368,41 +370,65 @@ for (int k = 0; k < stack.length; k++) {
 
                 String filename = new String(unit.getFileName());
                 if (! processedFiles.contains(filename) && JavaParser.cactionIsSpecifiedSourceFile(filename)) {
-                    batchCompiler.process(unit, i);
-                    processedFiles.add(filename);
-                    units.add(unit);
-                }
+                    // Set the ::currentSourceFile via JNI [TOO1, 2014-04-02]
+                    JavaParser.cactionSetupSourceFilename(filename);
 
-                if (unit.compilationResult.hasSyntaxError || unit.compilationResult.hasErrors()) {
-                    System.out.flush();
-                    System.out.println();
-                    System.out.println("*** ECJ front-end errors detected in input java program:");
-                    System.out.println(unit.compilationResult.toString());
-                    System.out.println();
-                    // TODO:  Need to die more gracefully!
-                    
-                    // for (int k = 0; k < args.length; k++) {
-                    // System.out.println("    " + args[k]);
-                    // }
-                    // System.exit(1); 
+                    processedFiles.add(filename);
+                    batchCompiler.process(unit, i);
+                    if (unit.compilationResult.hasMandatoryErrors()) {
+                        System.out.flush();
+                        System.out.println();
+                        System.out.println("*** ECJ compilation errors detected in input java program:"); // errors detected in input java program:");
+                        System.out.println(unit.compilationResult.toString());
+                        System.out.println();
+
+                        /*
+                        System.out.println("****************");
+                        System.out.println("***" + filename + ":");
+                        if (unit.compilationResult.hasProblems())
+                            System.out.println("    *** This unit has problems");
+                        if (unit.hasErrors())
+                            System.out.println("    *** This unit has errors");
+                        if (unit.compilationResult.hasErrors())
+                            System.out.println("    *** This unit's compilationResult has errors");
+                        if (unit.compilationResult.hasSyntaxError)
+                            System.out.println("    *** This unit has syntax errors");
+                        if (unit.compilationResult.hasMandatoryErrors())
+                            System.out.println("    *** This unit has mandatory errors");
+                        if (unit.compilationResult.hasBeenAccepted)
+                            System.out.println("    *** This unit has been accepted");
+                        if (unit.ignoreFurtherInvestigation)
+                            System.out.println("    *** This unit requires no further investigation");
+                        if (unit.ignoreMethodBodies)
+                            System.out.println("    *** This unit's method bodies should be ignored");
+                        if (unit.hasErrors())
+                            System.out.println("    *** This unit has errors");
+                        if (unit.compilationResult.hasInconsistentToplevelHierarchies)
+                            System.out.println("    *** This unit has inconsistent Top Level Hierarchyproblems");
+                        System.out.println("****************");
+                        */
+
+                        JavaParser.cactionEcjFatalCompilationErrors(filename);                        
+                    }
+                    else units.add(unit);
+
+                    // Reset the ::currentSourceFile via JNI [TOO1, 2014-04-02]
+                    JavaParser.cactionClearSourceFilename();
                 }
             }
 
-            totalUnits += units.size();
-// TODO: Remove this !
-/*
-//System.out.println("MaxUnits = " + maxUnits);
-System.out.println("Total units processed: " + totalUnits + "; In this iteration, the following " + units.size() + " unit" +  (totalUnits > 1 ? "s" : "") + " will be processed:");
-for (CompilationUnitDeclaration unit : units) {
-System.out.println("   " + new String(unit.getFileName()));
-}
-*/
+            totalCompilationUnitsProcessed += units.size();
+
             //
             //
             //
             try {
-                java_parser_support = new JavaParserSupport(verboseLevel, (units.size() == 1 && tempUnnamedFiles.contains(new String(units.get(0).getFileName()))));
-                java_parser_support.translate(units, languageLevel(main.compilerOptions.sourceLevel));
+                if (units.size() > 0) {
+                    if (javaParserSupport == null) { // JavaParserSupport not yet allocated?
+                        javaParserSupport = new JavaParserSupport(units.get(0));
+                    }
+                    javaParserSupport.translate(units, (units.size() == 1 && tempUnnamedFiles.contains(new String(units.get(0).getFileName()))));
+                }
             }
             catch (Exception e) {
                 e.printStackTrace();
@@ -457,7 +483,7 @@ System.out.println("   " + new String(unit.getFileName()));
     }
 
     public static boolean hasConflicts(String file_name, String package_name, String class_name) {
-        return java_parser_support.hasConflicts(file_name, package_name, class_name);
+        return javaParserSupport.hasConflicts(file_name, package_name, class_name);
     }
 
     private static HashSet<String> tempUnnamedFiles = new HashSet<String>();
@@ -498,7 +524,17 @@ System.out.println("   " + new String(unit.getFileName()));
      */
     public static void createTempNamedDirectory(String package_name) {
         assert (temp_directory != null);
-        String directory_name = getTempDirectory() + File.separator + package_name.replace('.', File.separatorChar);
+        String directory_name = getTempDirectory() + File.separator;
+        String suffix = package_name.replace('.', File.separatorChar);
+        for (int dot_index = suffix.indexOf(File.separatorChar); dot_index != -1; dot_index = suffix.indexOf(File.separatorChar, dot_index + 1)) {
+        	directory_name += suffix.substring(0, dot_index);
+            File named_directory = new File(directory_name);
+            if (! named_directory.mkdir()) {
+                throw new IllegalStateException("Unable to create the directory: " + directory_name);
+            }
+        	suffix = suffix.substring(dot_index);
+        }
+    	directory_name += suffix;
         File named_directory = new File(directory_name);
         if (! named_directory.mkdir()) {
             throw new IllegalStateException("Unable to create the directory: " + directory_name);

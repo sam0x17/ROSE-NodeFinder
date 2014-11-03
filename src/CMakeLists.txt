@@ -8,6 +8,7 @@ include_directories(
   ${KDE4_INCLUDES} ${KDE4_INCLUDE_DIR} ${QT_INCLUDES} ${Boost_INCLUDE_DIRS}
   ${CMAKE_BINARY_DIR}/src/roseSupport
   ${CMAKE_SOURCE_DIR}/src/roseExtensions/failSafe
+  ${CMAKE_SOURCE_DIR}/src/midend/programTransformation/transformationTracking
   ${CMAKE_BINARY_DIR}/src/3rdPartyLibraries/fortran-parser
 #-------------------------------------------------------------------------------
 # TOO1 (3/6/2014): Add Java includes for sageInterface.C: jni.h, jni_md.h, ecj.h
@@ -16,7 +17,9 @@ include_directories(
   ${JAVA_INCLUDE_PATH2}
   ${CMAKE_SOURCE_DIR}/src/frontend/ECJ_ROSE_Connection
 # DQ (3/8/2014): Added new include path fo RoseAst.h used in sageInterface.C and sageBuilder.C files.
-  ${CMAKE_SOURCE_DIR}/src/midend/astMatching)
+  ${CMAKE_SOURCE_DIR}/src/midend/astMatching
+  ${CMAKE_SOURCE_DIR}/src/util
+  ${CMAKE_SOURCE_DIR}/src/frontend)
 
 #set(  CMAKE_VERBOSE_MAKEFILE  true )
 
@@ -109,6 +112,8 @@ set( STORAGECLASSES_SRC
 # are included in other source files as required. They do not need to be compiled 
 # separately and generate a warning to the MSVC linker because they contain no symbols.
   set(rose_util_src 
+      ${CMAKE_SOURCE_DIR}/src/util/stringSupport/FileNameClassifier.C
+      ${CMAKE_SOURCE_DIR}/src/util/rose_getline.C
       ${CMAKE_BINARY_DIR}/src/util/rose_paths.C
       ${CMAKE_SOURCE_DIR}/src/util/commandlineProcessing/commandline_processing.C
       ${CMAKE_SOURCE_DIR}/src/util/commandlineProcessing/sla++.C
@@ -119,7 +124,6 @@ set( STORAGECLASSES_SRC
       ${CMAKE_SOURCE_DIR}/src/util/processSupport.C
       ${CMAKE_SOURCE_DIR}/src/util/rose_getline.C
       ${CMAKE_SOURCE_DIR}/src/util/rose_strtoull.C
-      ${CMAKE_SOURCE_DIR}/src/util/Stopwatch.C
       ${CMAKE_SOURCE_DIR}/src/util/stringSupport/escape.C
 #     ${CMAKE_SOURCE_DIR}/src/util/stringSupport/escape.C
       ${CMAKE_SOURCE_DIR}/src/util/stringSupport/FileNameClassifier.C
@@ -129,10 +133,22 @@ set( STORAGECLASSES_SRC
 #     ${CMAKE_SOURCE_DIR}/src/util/support/DAG.C
 #     ${CMAKE_SOURCE_DIR}/src/util/support/DirectedGraph.C
       ${CMAKE_SOURCE_DIR}/src/util/support/VectorCommandOptions.C
+      ${CMAKE_SOURCE_DIR}/src/util/stringSupport/string_functions.cpp
+#     ${CMAKE_SOURCE_DIR}/src/util/stringSupport/escape.C
+      ${CMAKE_SOURCE_DIR}/src/util/sawyer/Assert.C
+      ${CMAKE_SOURCE_DIR}/src/util/sawyer/CommandLine.C
+      ${CMAKE_SOURCE_DIR}/src/util/sawyer/GraphTraversal.C
+      ${CMAKE_SOURCE_DIR}/src/util/sawyer/Markup.C
+      ${CMAKE_SOURCE_DIR}/src/util/sawyer/MarkupPod.C
+      ${CMAKE_SOURCE_DIR}/src/util/sawyer/Message.C
+      ${CMAKE_SOURCE_DIR}/src/util/sawyer/ProgressBar.C
+      ${CMAKE_SOURCE_DIR}/src/util/sawyer/Sawyer.C
+      ${CMAKE_SOURCE_DIR}/src/util/sawyer/SmallObject.C
+      ${CMAKE_SOURCE_DIR}/src/util/sawyer/Stopwatch.C
      )
 add_library(roseutil SHARED ${rose_util_src})
 if (WIN32)
-  target_link_libraries(roseutil shlwapi.lib)
+  target_link_libraries(roseutil shlwapi.lib psapi.lib)
 endif()
 set_target_properties(roseutil PROPERTIES
   DEFINE_SYMBOL ROSE_UTIL_EXPORTS
@@ -176,6 +192,8 @@ set( sage3_SRC
    ${CMAKE_SOURCE_DIR}/src/frontend/SageIII/ompAstConstruction.cpp
    ${CMAKE_SOURCE_DIR}/src/frontend/SageIII/ompFortranParser.C 
    ${CMAKE_SOURCE_DIR}/src/frontend/SageIII/dwarfSupport.C 
+   ${CMAKE_SOURCE_DIR}/src/frontend/SageIII/atermSupport.C 
+   ${CMAKE_SOURCE_DIR}/src/frontend/SageIII/nodeBuildFunctionsForAterms.C 
    ${CMAKE_SOURCE_DIR}/src/frontend/SageIII/rose_graph_support.C
    ${CMAKE_BINARY_DIR}/src/frontend/SageIII/lex.yy.C
    ${CMAKE_BINARY_DIR}/src/frontend/SageIII/ompparser.C
@@ -263,8 +281,29 @@ set(rose_support_src
       ${CMAKE_SOURCE_DIR}/src/roseSupport/SqlDatabase.C
       ${CMAKE_SOURCE_DIR}/src/roseSupport/LinearCongruentialGenerator.C
       ${CMAKE_SOURCE_DIR}/src/roseSupport/Combinatorics.C
+      ${CMAKE_SOURCE_DIR}/src/roseSupport/Diagnostics.C
      )
 
+set(rosePartitioner2_SRC ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/AddressUsageMap.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/Attribute.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/BasicBlock.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/ControlFlowGraph.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/DataBlock.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/Engine.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/Exception.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/Function.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/FunctionCallGraph.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/InstructionProvider.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/Modules.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/ModulesElf.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/ModulesM68k.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/ModulesPe.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/ModulesX86.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/OwnedDataBlock.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/Partitioner.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/Semantics.C
+                         ${CMAKE_SOURCE_DIR}/src/frontend/Partitioner2/Utility.C
+)
 
 
 set(roseDisassemblers_SRC
@@ -282,9 +321,11 @@ set(roseDisassemblers_SRC
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/AssemblerX86Init8.C
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/AssemblerX86Init9.C
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/AssemblerX86Init.C
+   ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/BinaryDebugger.C
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/DisassemblerArm.C 
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/Disassembler.C 
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/DisassemblerMips.C 
+   ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/DisassemblerM68k.C 
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/DisassemblerPowerpc.C 
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/DisassemblerX86.C
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/Expressions.C
@@ -295,9 +336,14 @@ set(roseDisassemblers_SRC
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/Registers.C
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmArmInstruction.C
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmBlock.C
+   ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmExpression.C
+   ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmFloatValueExpression.C
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmFunction.C
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmInstruction.C
+   ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmIntegerValueExpression.C
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmInterpretation.C
+   ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmType.C
+   ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmM68kInstruction.C
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmMipsInstruction.C
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmPowerpcInstruction.C
    ${CMAKE_SOURCE_DIR}/src/frontend/Disassemblers/SgAsmX86Instruction.C
@@ -343,6 +389,7 @@ set(roseBinaryFormats_fileList_part0
    ${CMAKE_SOURCE_DIR}/src/frontend/BinaryFormats/Hexdump.C
    ${CMAKE_SOURCE_DIR}/src/frontend/BinaryFormats/MemoryMap.C
    ${CMAKE_SOURCE_DIR}/src/frontend/BinaryFormats/Rva.C 
+   ${CMAKE_SOURCE_DIR}/src/frontend/BinaryFormats/SRecord.C
 
    ### Generic Base Classes ###
    ${CMAKE_SOURCE_DIR}/src/frontend/BinaryFormats/GenericDynamicLinking.C
@@ -394,6 +441,7 @@ set( roseAsmUnparser_SRC
      ${CMAKE_SOURCE_DIR}/src/backend/asmUnparser/unparseX86Asm.C 
      ${CMAKE_SOURCE_DIR}/src/backend/asmUnparser/unparseArmAsm.C 
      ${CMAKE_SOURCE_DIR}/src/backend/asmUnparser/unparsePowerpcAsm.C 
+     ${CMAKE_SOURCE_DIR}/src/backend/asmUnparser/unparseM68kAsm.C
      ${CMAKE_SOURCE_DIR}/src/backend/asmUnparser/unparseMipsAsm.C
      ${CMAKE_SOURCE_DIR}/src/backend/asmUnparser/AsmUnparser.C
      ${CMAKE_SOURCE_DIR}/src/backend/asmUnparser/AsmUnparser_compat.C
@@ -437,10 +485,14 @@ set( midend_src
  #${CMAKE_SOURCE_DIR}/src/midend/astQuery/queryVariant.C
  ${CMAKE_SOURCE_DIR}/src/midend/astQuery/nodeQuery.C
  ${CMAKE_SOURCE_DIR}/src/midend/astSnippet/Snippet.C
+ ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/AbstractLocation.C
  ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/BinaryControlFlow.C
+ ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/BinaryDataFlow.C
  ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/BinaryDominance.C
  ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/BinaryFunctionCall.C
  ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/BinaryCallingConvention.C
+ ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/BinaryReturnValueUsed.C
+ ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/BinaryTaintedFlow.C
  ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/DwarfLineMapper.C
  ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/GraphAlgorithms.C
  ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/binary_analysis.C
@@ -504,6 +556,14 @@ set( libastprocessing_SRC  ${libastprocessing_SRC}
    )
 endif (NOT WIN32)
 
+set(libastmatching_SRC
+   ${CMAKE_SOURCE_DIR}/src/midend/astMatching/AstMatching.C
+   ${CMAKE_SOURCE_DIR}/src/midend/astMatching/matcherlexer.ll
+   ${CMAKE_SOURCE_DIR}/src/midend/astMatching/matcherparser.yy
+   ${CMAKE_SOURCE_DIR}/src/midend/astMatching/MatchOperation.C
+   ${CMAKE_SOURCE_DIR}/src/midend/astMatching/RoseAst.C
+   ${CMAKE_SOURCE_DIR}/src/midend/astMatching/matcherparser.C
+)
 
 set( midend_util_src
 ${CMAKE_SOURCE_DIR}/src/midend/astUtil/astInterface/CPPAstInterface.C
@@ -539,6 +599,8 @@ ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/dataflowanalyses/RoseBin_VariableA
 ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/dataflowanalyses/InterruptAnalysis.cpp
 ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/dataflowanalyses/RoseBin_DefUseAnalysis.cpp
 ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/instructionSemantics/BaseSemantics2.C
+${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/instructionSemantics/DataFlowSemantics2.C
+${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/instructionSemantics/DispatcherM68k.C
 ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/instructionSemantics/DispatcherPowerpc.C
 ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/instructionSemantics/DispatcherX86.C
 ${CMAKE_SOURCE_DIR}/src/midend/binaryAnalyses/instructionSemantics/findConstants.C
@@ -667,6 +729,8 @@ if (NOT enable-internalFrontendDevelopment)
   #${CMAKE_SOURCE_DIR}/src/midend/programAnalysis/dominatorTreesAndDominanceFrontiers/ControlFlowGraph.C
   #${CMAKE_SOURCE_DIR}/src/midend/programAnalysis/dominatorTreesAndDominanceFrontiers/DominanceFrontier.C
   #${CMAKE_SOURCE_DIR}/src/midend/programAnalysis/dominatorTreesAndDominanceFrontiers/DominatorTree.C
+  ${CMAKE_SOURCE_DIR}/src/midend/programAnalysis/EditDistance/EditDistance.C
+  ${CMAKE_SOURCE_DIR}/src/midend/programAnalysis/EditDistance/TreeEditDistance.C
   )
 endif()
 
@@ -733,6 +797,7 @@ set( libsageInterface_SRC
      ${CMAKE_SOURCE_DIR}/src/frontend/SageIII/sageInterface/generateUniqueName.C 
      ${CMAKE_SOURCE_DIR}/src/frontend/SageIII/sageInterface/sageBuilder.C 
      ${CMAKE_SOURCE_DIR}/src/frontend/SageIII/sageInterface/sageBuilder_fortran.C
+     ${CMAKE_SOURCE_DIR}/src/frontend/SageIII/sageInterface/sageBuilder_untypedNodes.C
      ${CMAKE_SOURCE_DIR}/src/frontend/SageIII/sageInterface/sageBuilderAsm.C 
      ${CMAKE_SOURCE_DIR}/src/frontend/SageIII/sageInterface/abiStuff.C
    )
@@ -899,6 +964,11 @@ set(failsafe_SRC
   ${CMAKE_SOURCE_DIR}/src/roseExtensions/failSafe/failSafePragma.C 
  )
 
+set(trans_tracking_SRC
+  ${CMAKE_SOURCE_DIR}/src/midend/programTransformation/transformationTracking/transformationTracking.cpp
+ )
+
+
 set(mstl_SRC
   ${CMAKE_SOURCE_DIR}/src/3rdPartyLibraries/MSTL/DOTGraphInterface.C)
 if (NOT enable-internalFrontendDevelopment)
@@ -935,6 +1005,7 @@ set(rose_LIB_SRCS dummyCppFileForLibrose.C
  ${virtualCFG_SRC}
  ${AstFromString_SRC}
  ${rose_support_src}
+ ${rosePartitioner2_SRC}
  ${roseDisassemblers_SRC}
  ${roseBinaryFormats_fileList_part0}
  ${roseBinaryLoader_SRC}
@@ -959,10 +1030,15 @@ set(rose_LIB_SRCS dummyCppFileForLibrose.C
  ${libastPostProcessing_SRC}
  ${roseExtensions_SRC}
  ${failsafe_SRC}
+ ${trans_tracking_SRC}
  ${binaryFrontend_SRC}
  ${AST_REWRITE_SRC}
  ${mstl_SRC}
 )
+if(enable-java)
+  list(APPEND rose_LIB_SRCS $<TARGET_OBJECTS:roseJava>)
+endif()
+
 
 ###############################################################################################################################
 ### The stringify.h and stringify.C files have prototypes and definitions for functions that convert enum constants
@@ -1032,8 +1108,8 @@ if(enable-fortran)
   list(APPEND LINK_FILES roseFortran)
 endif()
 
-if(enable-java)
-  list(APPEND LINK_FILES roseJava)
+if (enable-java)
+  list(APPEND LINK_FILES ${JAVA_JVM_LIBRARY})
 endif()
 
 if(enable-python)

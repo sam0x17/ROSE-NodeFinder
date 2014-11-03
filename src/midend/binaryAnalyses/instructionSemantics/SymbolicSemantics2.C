@@ -2,6 +2,7 @@
 #include "SymbolicSemantics2.h"
 #include "integerOps.h"
 
+namespace rose {
 namespace BinaryAnalysis {
 namespace InstructionSemantics2 {
 namespace SymbolicSemantics {
@@ -28,7 +29,7 @@ uint64_t
 SValue::get_number() const
 {
     LeafNodePtr leaf = expr->isLeafNode();
-    assert(leaf!=NULL);
+    ASSERT_not_null(leaf);
     return leaf->get_value();
 }
 
@@ -74,7 +75,7 @@ bool
 SValue::may_equal(const BaseSemantics::SValuePtr &other_, SMTSolver *solver) const 
 {
     SValuePtr other = SValue::promote(other_);
-    assert(get_width()==other->get_width());
+    ASSERT_require(get_width()==other->get_width());
     return get_expression()->may_equal(other->get_expression(), solver);
 }
 
@@ -82,7 +83,7 @@ bool
 SValue::must_equal(const BaseSemantics::SValuePtr &other_, SMTSolver *solver) const
 {
     SValuePtr other = SValue::promote(other_);
-    assert(get_width()==other->get_width());
+    ASSERT_require(get_width()==other->get_width());
     return get_expression()->must_equal(other->get_expression(), solver);
 }
 
@@ -124,12 +125,19 @@ SValue::print(std::ostream &stream, BaseSemantics::Formatter &formatter_) const
  *                                      Memory state
  *******************************************************************************************************************************/
 
+MemoryState::CellCompressorChoice MemoryState::cc_choice;
+
 SValuePtr
 MemoryState::CellCompressorMcCarthy::operator()(const SValuePtr &address, const BaseSemantics::SValuePtr &dflt,
-                                                BaseSemantics::RiscOperators *ops, const CellList &cells)
+                                                BaseSemantics::RiscOperators *addrOps, BaseSemantics::RiscOperators *valOps,
+                                                const CellList &cells)
 {
-    RiscOperators *ops_symbolic = dynamic_cast<RiscOperators*>(ops);
-    bool compute_usedef = ops_symbolic ?  true : ops_symbolic->get_compute_usedef();
+    bool compute_usedef = true;
+    if (RiscOperators *addrOpsSymbolic = dynamic_cast<RiscOperators*>(addrOps)) {
+        compute_usedef = addrOpsSymbolic->get_compute_usedef();
+    } else if (RiscOperators *valOpsSymbolic = dynamic_cast<RiscOperators*>(valOps)) {
+        compute_usedef = valOpsSymbolic->get_compute_usedef();
+    }
 
     if (1==cells.size())
         return SValue::promote(cells.front()->get_value()->copy());
@@ -146,8 +154,8 @@ MemoryState::CellCompressorMcCarthy::operator()(const SValuePtr &address, const 
             definers.insert(cell_definers.begin(), cell_definers.end());
         }
     }
-    SValuePtr retval = SValue::promote(address->create(InternalNode::create(8, InsnSemanticsExpr::OP_READ,
-                                                                            expr, address->get_expression())));
+    SValuePtr retval = SValue::promote(address->undefined_(8)); // "address" used only to lookup virtual function
+    retval->set_expression(InternalNode::create(8, InsnSemanticsExpr::OP_READ, expr, address->get_expression()));
     if (compute_usedef)
         retval->add_defining_instructions(definers);
     return retval;
@@ -155,7 +163,8 @@ MemoryState::CellCompressorMcCarthy::operator()(const SValuePtr &address, const 
 
 SValuePtr
 MemoryState::CellCompressorSimple::operator()(const SValuePtr &address, const BaseSemantics::SValuePtr &dflt,
-                                               BaseSemantics::RiscOperators *ops, const CellList &cells)
+                                              BaseSemantics::RiscOperators *addrOps, BaseSemantics::RiscOperators *valOps,
+                                              const CellList &cells)
 {
     if (1==cells.size())
         return SValue::promote(cells.front()->get_value()->copy());
@@ -164,21 +173,23 @@ MemoryState::CellCompressorSimple::operator()(const SValuePtr &address, const Ba
 
 SValuePtr
 MemoryState::CellCompressorChoice::operator()(const SValuePtr &address, const BaseSemantics::SValuePtr &dflt,
-                                              BaseSemantics::RiscOperators *ops, const CellList &cells)
+                                              BaseSemantics::RiscOperators *addrOps, BaseSemantics::RiscOperators *valOps,
+                                              const CellList &cells)
 {
-    if (ops->get_solver())
-        return cc_mccarthy(address, dflt, ops, cells);
-    return cc_simple(address, dflt, ops, cells);
+    if (addrOps->get_solver() || valOps->get_solver())
+        return cc_mccarthy(address, dflt, addrOps, valOps, cells);
+    return cc_simple(address, dflt, addrOps, valOps, cells);
 }
 
 BaseSemantics::SValuePtr
 MemoryState::readMemory(const BaseSemantics::SValuePtr &address_, const BaseSemantics::SValuePtr &dflt,
-                        size_t nbits, BaseSemantics::RiscOperators *ops)
+                        BaseSemantics::RiscOperators *addrOps, BaseSemantics::RiscOperators *valOps)
 {
+    size_t nbits = dflt->get_width();
     SValuePtr address = SValue::promote(address_);
-    assert(8==nbits); // SymbolicSemantics::MemoryState assumes that memory cells contain only 8-bit data
+    ASSERT_require(8==nbits); // SymbolicSemantics::MemoryState assumes that memory cells contain only 8-bit data
     bool short_circuited;
-    CellList matches = scan(address, nbits, ops, short_circuited/*out*/);
+    CellList matches = scan(address, nbits, addrOps, valOps, short_circuited/*out*/);
 
     // If we fell off the end of the list then the read could be reading from a memory location for which no cell exists.
     if (!short_circuited) {
@@ -187,19 +198,19 @@ MemoryState::readMemory(const BaseSemantics::SValuePtr &address_, const BaseSema
         matches.push_back(tmpcell);
     }
 
-    assert(dflt->get_width()==nbits);
-    SValuePtr retval = get_cell_compressor()->operator()(address, dflt, ops, matches);
-    assert(retval->get_width()==8);
+    ASSERT_require(dflt->get_width()==nbits);
+    SValuePtr retval = get_cell_compressor()->operator()(address, dflt, addrOps, valOps, matches);
+    ASSERT_require(retval->get_width()==8);
     return retval;
 }
 
 void
 MemoryState::writeMemory(const BaseSemantics::SValuePtr &address, const BaseSemantics::SValuePtr &value,
-                         BaseSemantics::RiscOperators *ops)
+                         BaseSemantics::RiscOperators *addrOps, BaseSemantics::RiscOperators *valOps)
 {
-    assert(32==address->get_width());
-    assert(8==value->get_width());
-    BaseSemantics::MemoryCellList::writeMemory(address, value, ops);
+    ASSERT_require(32==address->get_width());
+    ASSERT_require(8==value->get_width());
+    BaseSemantics::MemoryCellList::writeMemory(address, value, addrOps, valOps);
 }
 
 /*******************************************************************************************************************************
@@ -247,7 +258,7 @@ RiscOperators::and_(const BaseSemantics::SValuePtr &a_, const BaseSemantics::SVa
 {
     SValuePtr a = SValue::promote(a_);
     SValuePtr b = SValue::promote(b_);
-    assert(a->get_width()==b->get_width());
+    ASSERT_require(a->get_width()==b->get_width());
 
     SValuePtr retval = svalue_expr(InternalNode::create(a->get_width(), InsnSemanticsExpr::OP_BV_AND,
                                                         a->get_expression(), b->get_expression()));
@@ -261,7 +272,7 @@ RiscOperators::or_(const BaseSemantics::SValuePtr &a_, const BaseSemantics::SVal
 {
     SValuePtr a = SValue::promote(a_);
     SValuePtr b = SValue::promote(b_);
-    assert(a->get_width()==b->get_width());
+    ASSERT_require(a->get_width()==b->get_width());
     
     SValuePtr retval = svalue_expr(InternalNode::create(a->get_width(), InsnSemanticsExpr::OP_BV_OR,
                                                         a->get_expression(), b->get_expression()));
@@ -275,7 +286,7 @@ RiscOperators::xor_(const BaseSemantics::SValuePtr &a_, const BaseSemantics::SVa
 {
     SValuePtr a = SValue::promote(a_);
     SValuePtr b = SValue::promote(b_);
-    assert(a->get_width()==b->get_width());
+    ASSERT_require(a->get_width()==b->get_width());
 
     SValuePtr retval;
     // We leave these simplifications here because InsnSemanticsExpr doesn't yet have a way to pass an SMT solver to its
@@ -307,8 +318,8 @@ BaseSemantics::SValuePtr
 RiscOperators::extract(const BaseSemantics::SValuePtr &a_, size_t begin_bit, size_t end_bit)
 {
     SValuePtr a = SValue::promote(a_);
-    assert(end_bit<=a->get_width());
-    assert(begin_bit<end_bit);
+    ASSERT_require(end_bit<=a->get_width());
+    ASSERT_require(begin_bit<end_bit);
     SValuePtr retval = svalue_expr(InternalNode::create(end_bit-begin_bit, InsnSemanticsExpr::OP_EXTRACT,
                                                         LeafNode::create_integer(32, begin_bit),
                                                         LeafNode::create_integer(32, end_bit),
@@ -352,8 +363,8 @@ RiscOperators::ite(const BaseSemantics::SValuePtr &sel_,
     SValuePtr sel = SValue::promote(sel_);
     SValuePtr a = SValue::promote(a_);
     SValuePtr b = SValue::promote(b_);
-    assert(1==sel->get_width());
-    assert(a->get_width()==b->get_width());
+    ASSERT_require(1==sel->get_width());
+    ASSERT_require(a->get_width()==b->get_width());
 
     SValuePtr retval;
     if (sel->is_number()) {
@@ -497,7 +508,7 @@ RiscOperators::add(const BaseSemantics::SValuePtr &a_, const BaseSemantics::SVal
 {
     SValuePtr a = SValue::promote(a_);
     SValuePtr b = SValue::promote(b_);
-    assert(a->get_width()==b->get_width());
+    ASSERT_require(a->get_width()==b->get_width());
     SValuePtr retval = svalue_expr(InternalNode::create(a->get_width(), InsnSemanticsExpr::OP_ADD,
                                                         a->get_expression(), b->get_expression()));
     if (compute_usedef)
@@ -509,7 +520,7 @@ BaseSemantics::SValuePtr
 RiscOperators::addWithCarries(const BaseSemantics::SValuePtr &a, const BaseSemantics::SValuePtr &b,
                               const BaseSemantics::SValuePtr &c, BaseSemantics::SValuePtr &carry_out/*out*/)
 {
-    assert(a->get_width()==b->get_width() && c->get_width()==1);
+    ASSERT_require(a->get_width()==b->get_width() && c->get_width()==1);
     BaseSemantics::SValuePtr aa = unsignedExtend(a, a->get_width()+1);
     BaseSemantics::SValuePtr bb = unsignedExtend(b, a->get_width()+1);
     BaseSemantics::SValuePtr cc = unsignedExtend(c, a->get_width()+1);
@@ -645,30 +656,39 @@ RiscOperators::writeRegister(const RegisterDescriptor &reg, const BaseSemantics:
 BaseSemantics::SValuePtr
 RiscOperators::readMemory(const RegisterDescriptor &segreg,
                           const BaseSemantics::SValuePtr &address,
-                          const BaseSemantics::SValuePtr &condition,
-                          size_t nbits) {
-    assert(1==condition->get_width()); // FIXME: condition is not used
-    assert(8==nbits || 16==nbits || 32==nbits);
+                          const BaseSemantics::SValuePtr &dflt,
+                          const BaseSemantics::SValuePtr &condition) {
+    size_t nbits = dflt->get_width();
+    ASSERT_require(0 == nbits % 8);
+    ASSERT_require(1==condition->get_width()); // FIXME: condition is not used
 
     PartialDisableUsedef du(this);
 
-    // Read the bytes in little endian order and concatenate them together. InsnSemanticsExpr will simplify the expression
-    // so that reading after writing a multi-byte value will return the original value written rather than a concatenation
-    // of byte extractions.
-    SValuePtr dflt = svalue_undefined(nbits), retval;
+    // Read the bytes and concatenate them together. InsnSemanticsExpr will simplify the expression so that reading after
+    // writing a multi-byte value will return the original value written rather than a concatenation of byte extractions.
+    SValuePtr retval;
     InsnSet defs;
+    size_t nbytes = nbits/8;
+    BaseSemantics::MemoryStatePtr mem = get_state()->get_memory_state();
     for (size_t bytenum=0; bytenum<nbits/8; ++bytenum) {
-        BaseSemantics::SValuePtr byte_dflt = extract(dflt, 8*bytenum, 8*bytenum+8);
+        size_t byteOffset = ByteOrder::ORDER_MSB==mem->get_byteOrder() ? nbytes-(bytenum+1) : bytenum;
+        BaseSemantics::SValuePtr byte_dflt = extract(dflt, 8*byteOffset, 8*byteOffset+8);
         BaseSemantics::SValuePtr byte_addr = add(address, number_(address->get_width(), bytenum));
-        SValuePtr byte_value = SValue::promote(state->readMemory(byte_addr, byte_dflt, 8, this));
-        retval = 0==bytenum ? byte_value : SValue::promote(concat(retval, byte_value));
+        SValuePtr byte_value = SValue::promote(state->readMemory(byte_addr, byte_dflt, this, this));
+        if (0==bytenum) {
+            retval = byte_value;
+        } else if (ByteOrder::ORDER_MSB==mem->get_byteOrder()) {
+            retval = SValue::promote(concat(byte_value, retval));
+        } else {
+            retval = SValue::promote(concat(retval, byte_value));
+        }
         if (compute_usedef) {
             const InsnSet &definers = byte_value->get_defining_instructions();
             defs.insert(definers.begin(), definers.end());
         }
     }
 
-    assert(retval!=NULL && retval->get_width()==nbits);
+    ASSERT_require(retval!=NULL && retval->get_width()==nbits);
     if (compute_usedef)
         retval->defined_by(NULL, defs);
     return retval;
@@ -682,25 +702,27 @@ RiscOperators::writeMemory(const RegisterDescriptor &segreg,
     SValuePtr value = SValue::promote(value_->copy());
     PartialDisableUsedef du(this);
     size_t nbits = value->get_width();
-    assert(8==nbits || 16==nbits || 32==nbits);
-    assert(1==condition->get_width()); // FIXME: condition is not used
+    ASSERT_require(0 == nbits % 8);
+    ASSERT_require(1==condition->get_width()); // FIXME: condition is not used
     size_t nbytes = nbits/8;
+    BaseSemantics::MemoryStatePtr mem = get_state()->get_memory_state();
     for (size_t bytenum=0; bytenum<nbytes; ++bytenum) {
-        BaseSemantics::SValuePtr byte_value = extract(value, 8*bytenum, 8*bytenum+8);
+        size_t byteOffset = ByteOrder::ORDER_MSB==mem->get_byteOrder() ? nbytes-(bytenum+1) : bytenum;
+        BaseSemantics::SValuePtr byte_value = extract(value, 8*byteOffset, 8*byteOffset+8);
         BaseSemantics::SValuePtr byte_addr = add(address, number_(address->get_width(), bytenum));
-        state->writeMemory(byte_addr, byte_value, this);
+        state->writeMemory(byte_addr, byte_value, this, this);
 
         // Update the latest writer info if we have a current instruction and the memory state supports it.
         if (SgAsmInstruction *insn = get_insn()) {
-            BaseSemantics::MemoryStatePtr mem = get_state()->get_memory_state();
             BaseSemantics::MemoryCellListPtr cells = boost::dynamic_pointer_cast<BaseSemantics::MemoryCellList>(mem);
             BaseSemantics::MemoryCellPtr cell = cells->get_latest_written_cell();
-            assert(cell!=NULL); // we just wrote to it!
+            ASSERT_not_null(cell); // we just wrote to it!
             cell->set_latest_writer(insn->get_address());
         }
     }
 }
 
+} // namespace
 } // namespace
 } // namespace
 } // namespace

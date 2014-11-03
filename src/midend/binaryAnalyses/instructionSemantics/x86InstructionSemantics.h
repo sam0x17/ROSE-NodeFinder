@@ -5,17 +5,25 @@
  * run automatically because it depends on setting up a slave machine who's architecture is what is being simulated by the
  * instruction semantics (not necessarily the same architecture that's running ROSE). */
 
-#include "semanticsModule.h"
 #include <cassert>
 #include <cstdio>
 #include <iostream>
 #include "integerOps.h"
 #include "AsmUnparser_compat.h" /* for unparseInstructionWithAddress() */
 
+namespace rose {
+namespace BinaryAnalysis {
+namespace InstructionSemantics {
+
+static inline int numBytesInAsmType(SgAsmType* type) {
+    ASSERT_not_null(type);
+    return type->get_nBytes();
+}
+
 /* Returns the segment register corresponding to the specified register reference address expression. */
 static inline X86SegmentRegister getSegregFromMemoryReference(SgAsmMemoryReferenceExpression* mr) {
     X86SegmentRegister segreg = x86_segreg_none;
-    SgAsmx86RegisterReferenceExpression* seg = isSgAsmx86RegisterReferenceExpression(mr->get_segment());
+    SgAsmRegisterReferenceExpression* seg = isSgAsmRegisterReferenceExpression(mr->get_segment());
     if (seg) {
         ROSE_ASSERT(seg->get_descriptor().get_major() == x86_regclass_segment);
         segreg = (X86SegmentRegister)(seg->get_descriptor().get_minor());
@@ -26,13 +34,10 @@ static inline X86SegmentRegister getSegregFromMemoryReference(SgAsmMemoryReferen
     return segreg;
 }
 
-namespace BinaryAnalysis {
-    namespace InstructionSemantics {
-
 /** Translation class.  Translates x86 instructions to RISC-like operations and invokes those operations in the supplied
- *  semantic policy (a template argument).  See the BinaryAnalysis::InstructionSemantics name space for details. Apologies for
- *  the lack of documentation for this class.  You can at least find some examples in the semantics.C file of the
- *  tests/roseTests/binaryTests directory, among others. */
+ *  semantic policy (a template argument).  See the rose::BinaryAnalysis::InstructionSemantics name space for
+ *  details. Apologies for the lack of documentation for this class.  You can at least find some examples in the semantics.C
+ *  file of the tests/roseTests/binaryTests directory, among others. */
 template <typename Policy, template <size_t> class WordType>
 struct X86InstructionSemantics {
 #   ifdef Word
@@ -101,7 +106,7 @@ struct X86InstructionSemantics {
      *  is reset to the beginning of the instruction if the loop counter, cx register, is non-zero after decrementing and @p
      *  repeat is true. Otherwise the instruction pointer is not adjusted and the loop effectively exits.  If @p cond is false
      *  then this function has no effect on the state. */
-    void rep_repeat(SgAsmx86Instruction *insn, WordType<1> repeat, WordType<1> cond) {
+    void rep_repeat(SgAsmX86Instruction *insn, WordType<1> repeat, WordType<1> cond) {
         WordType<32> new_cx = policy.add(readRegister<32>(REG_ECX),
                                          policy.ite(cond,
                                                     number<32>(-1),
@@ -116,7 +121,7 @@ struct X86InstructionSemantics {
 
     /** Return the value of the memory pointed to by the SI register. */
     template<size_t N>
-    WordType<8*N> stringop_load_si(SgAsmx86Instruction *insn, WordType<1> cond) {
+    WordType<8*N> stringop_load_si(SgAsmX86Instruction *insn, WordType<1> cond) {
         X86SegmentRegister segreg = insn->get_segmentOverride() == x86_segreg_none ? x86_segreg_ds : insn->get_segmentOverride();
         return readMemory<8*N>(segreg, readRegister<32>(REG_ESI), cond);
     }
@@ -130,7 +135,7 @@ struct X86InstructionSemantics {
     /** Instruction semantics for stosN where N is 1 (b), 2 (w), or 4 (d). If @p cond is false then this instruction does not
      *  change any state. */
     template<size_t N>
-    void stos_semantics(SgAsmx86Instruction *insn, WordType<1> cond) {
+    void stos_semantics(SgAsmX86Instruction *insn, WordType<1> cond) {
         const SgAsmExpressionPtrList& operands = insn->get_operandList()->get_operands();
         if (operands.size()!=0)
             throw Exception("instruction must have no operands", insn);
@@ -154,7 +159,7 @@ struct X86InstructionSemantics {
     /** Instruction semantics for rep_stosN where N is 1 (b), 2 (w), or 4 (d). This method handles semantics for one iteration
      * of stosN. See https://siyobik.info/index.php?module=x86&id=279 */
     template<size_t N>
-    void rep_stos_semantics(SgAsmx86Instruction *insn) {
+    void rep_stos_semantics(SgAsmX86Instruction *insn) {
         WordType<1> in_loop = rep_enter();
         stos_semantics<N>(insn, in_loop);
         rep_repeat(insn, policy.true_(), in_loop);
@@ -163,7 +168,7 @@ struct X86InstructionSemantics {
     /** Instruction semantics for movsN where N is 1 (b), 2 (w), or 4 (d). If @p cond is false then this instruction does not
      * change any state. */
     template<size_t N>
-    void movs_semantics(SgAsmx86Instruction *insn, WordType<1> cond) {
+    void movs_semantics(SgAsmX86Instruction *insn, WordType<1> cond) {
         const SgAsmExpressionPtrList &operands = insn->get_operandList()->get_operands();
         if (operands.size()!=0)
             throw Exception("instruction must have no operands", insn);
@@ -193,7 +198,7 @@ struct X86InstructionSemantics {
     /** Instruction semantics for rep_movsN where N is 1 (b), 2 (w), or 4 (d). This method handles semantics for one iteration
      *  of the instruction. */
     template<size_t N>
-    void rep_movs_semantics(SgAsmx86Instruction *insn) {
+    void rep_movs_semantics(SgAsmX86Instruction *insn) {
         WordType<1> in_loop = rep_enter();
         movs_semantics<N>(insn, in_loop);
         rep_repeat(insn, policy.true_(), in_loop);
@@ -202,7 +207,7 @@ struct X86InstructionSemantics {
     /** Instruction semantics for cmpsN where N is 1 (b), 2 (w), or 4 (d).  If @p cond is false then this instruction does not
      * change any state. See Intel Instruction Set Reference 3-154 Vol 2a, March 2009 for opcodes 0xa6 and 0xa7 with no prefix. */
     template<size_t N>
-    void cmps_semantics(SgAsmx86Instruction *insn, WordType<1> cond) {
+    void cmps_semantics(SgAsmX86Instruction *insn, WordType<1> cond) {
         const SgAsmExpressionPtrList &operands = insn->get_operandList()->get_operands();
         if (operands.size()!=0)
             throw Exception("instruction must have no operands", insn);
@@ -227,7 +232,7 @@ struct X86InstructionSemantics {
 
     /** Instruction semantics for one iteration of the repe_cmpsN instruction, where N is 1 (b), 2 (w), or 4 (d). */
     template<size_t N>
-    void repe_cmps_semantics(SgAsmx86Instruction *insn) {
+    void repe_cmps_semantics(SgAsmX86Instruction *insn) {
         WordType<1> in_loop = rep_enter();
         cmps_semantics<N>(insn, in_loop);
         WordType<1> repeat = readRegister<1>(REG_ZF);
@@ -236,7 +241,7 @@ struct X86InstructionSemantics {
 
     /** Instruction semantics for one iteration of the repne_cmpsN instruction, where N is 1 (b), 2 (w), or 4 (d). */
     template<size_t N>
-    void repne_cmps_semantics(SgAsmx86Instruction *insn) {
+    void repne_cmps_semantics(SgAsmX86Instruction *insn) {
         WordType<1> in_loop = rep_enter();
         cmps_semantics<N>(insn, in_loop);
         WordType<1> repeat = policy.invert(readRegister<1>(REG_ZF));
@@ -246,7 +251,7 @@ struct X86InstructionSemantics {
     /** Instruction semantics for scasN where N is 1 (b), 2 (w), or 4 (d). If @p cond is false then this instruction does not
      * change any state. */
     template<size_t N>
-    void scas_semantics(SgAsmx86Instruction *insn, WordType<1> cond) {
+    void scas_semantics(SgAsmX86Instruction *insn, WordType<1> cond) {
         const SgAsmExpressionPtrList &operands = insn->get_operandList()->get_operands();
         if (operands.size()!=0)
             throw Exception("instruction must have no operands", insn);
@@ -266,7 +271,7 @@ struct X86InstructionSemantics {
 
     /** Instruction semantics for one iteration of repe_scasN where N is 1 (b), 2 (w), or 4 (d). */
     template<size_t N>
-    void repe_scas_semantics(SgAsmx86Instruction *insn) {
+    void repe_scas_semantics(SgAsmX86Instruction *insn) {
         WordType<1> in_loop = rep_enter();
         scas_semantics<N>(insn, in_loop);
         WordType<1> repeat = readRegister<1>(REG_ZF);
@@ -275,7 +280,7 @@ struct X86InstructionSemantics {
 
     /** Instruction semantics for one iterator of repne_scasN where N is 1 (b), 2 (w), or 4 (d). */
     template<size_t N>
-    void repne_scas_semantics(SgAsmx86Instruction *insn) {
+    void repne_scas_semantics(SgAsmX86Instruction *insn) {
         WordType<1> in_loop = rep_enter();
         scas_semantics<N>(insn, in_loop);
         WordType<1> repeat = policy.invert(readRegister<1>(REG_ZF));
@@ -299,7 +304,7 @@ struct X86InstructionSemantics {
         
     /** Instruction semantics for lodsN where N is 1 (b), 2 (w), or 4 (d). */
     template<size_t N>
-    void lods_semantics(SgAsmx86Instruction *insn) {
+    void lods_semantics(SgAsmX86Instruction *insn) {
         const SgAsmExpressionPtrList &operands = insn->get_operandList()->get_operands();
         if (operands.size()!=0)
             throw Exception("instruction must have no operands", insn);
@@ -319,7 +324,7 @@ struct X86InstructionSemantics {
     template<size_t operandBits, size_t shiftSignificantBits>
     WordType<operandBits> shift_semantics(X86InstructionKind kind, const WordType<operandBits> &operand,
                                           const WordType<operandBits> &source_bits, const WordType<8> &total_shift) {
-        assert(x86_shr==kind || x86_sar==kind || x86_shl==kind || x86_shld==kind || x86_shrd==kind);
+        ASSERT_require(x86_shr==kind || x86_sar==kind || x86_shl==kind || x86_shld==kind || x86_shrd==kind);
 
         // The 8086 does not mask the shift count; processors starting with the 80286 (including virtual-8086 mode) do
         // mask.  The effect (other than timing) is the same either way.
@@ -328,7 +333,7 @@ struct X86InstructionSemantics {
 
         // isLargeShift is true if the (unmasked) amount by which to shift is greater than or equal to the size in
         // bits of the destination operand.
-        assert(shiftSignificantBits<8);
+        ASSERT_require(shiftSignificantBits<8);
         WordType<1> isLargeShift = policy.invert(policy.equalToZero(extract<shiftSignificantBits, 8>(total_shift)));
 
         // isOneBitShift is true if the (masked) amount by which to shift is equal to one.
@@ -502,15 +507,15 @@ struct X86InstructionSemantics {
     /* Returns an eight-bit value desribed by an instruction operand. */
     Word(8) read8(SgAsmExpression* e) {
         switch (e->variantT()) {
-            case V_SgAsmx86RegisterReferenceExpression: {
-                SgAsmx86RegisterReferenceExpression* rre = isSgAsmx86RegisterReferenceExpression(e);
+            case V_SgAsmDirectRegisterExpression: {
+                SgAsmDirectRegisterExpression* rre = isSgAsmDirectRegisterExpression(e);
                 return policy.readRegister<8>(rre->get_descriptor());
             }
             case V_SgAsmBinaryAdd: {
                 return policy.add(read8(isSgAsmBinaryAdd(e)->get_lhs()), read8(isSgAsmBinaryAdd(e)->get_rhs()));
             }
             case V_SgAsmBinaryMultiply: {
-                SgAsmByteValueExpression* rhs = isSgAsmByteValueExpression(isSgAsmBinaryMultiply(e)->get_rhs());
+                SgAsmIntegerValueExpression* rhs = isSgAsmIntegerValueExpression(isSgAsmBinaryMultiply(e)->get_rhs());
                 if (!rhs)
                     throw Exception("byte value expression expected", current_instruction);
                 SgAsmExpression* lhs = isSgAsmBinaryMultiply(e)->get_lhs();
@@ -520,11 +525,8 @@ struct X86InstructionSemantics {
                 return readMemory<8>(getSegregFromMemoryReference(isSgAsmMemoryReferenceExpression(e)),
                                      readEffectiveAddress(e), policy.true_());
             }
-            case V_SgAsmByteValueExpression:
-            case V_SgAsmWordValueExpression:
-            case V_SgAsmDoubleWordValueExpression:
-            case V_SgAsmQuadWordValueExpression: {
-                uint64_t val = SageInterface::getAsmSignedConstant(isSgAsmValueExpression(e));
+            case V_SgAsmIntegerValueExpression: {
+                uint64_t val = isSgAsmIntegerValueExpression(e)->get_signedValue();
                 return number<8>(val & 0xFFU);
             }
             default: {
@@ -537,15 +539,15 @@ struct X86InstructionSemantics {
     /* Returns a 16-bit value described by an instruction operand. */
     Word(16) read16(SgAsmExpression* e) {
         switch (e->variantT()) {
-            case V_SgAsmx86RegisterReferenceExpression: {
-                SgAsmx86RegisterReferenceExpression* rre = isSgAsmx86RegisterReferenceExpression(e);
+            case V_SgAsmDirectRegisterExpression: {
+                SgAsmDirectRegisterExpression* rre = isSgAsmDirectRegisterExpression(e);
                 return policy.readRegister<16>(rre->get_descriptor());
             }
             case V_SgAsmBinaryAdd: {
                 return policy.add(read16(isSgAsmBinaryAdd(e)->get_lhs()), read16(isSgAsmBinaryAdd(e)->get_rhs()));
             }
             case V_SgAsmBinaryMultiply: {
-                SgAsmByteValueExpression* rhs = isSgAsmByteValueExpression(isSgAsmBinaryMultiply(e)->get_rhs());
+                SgAsmIntegerValueExpression* rhs = isSgAsmIntegerValueExpression(isSgAsmBinaryMultiply(e)->get_rhs());
                 if (!rhs)
                     throw Exception("byte value expression expected", current_instruction);
                 SgAsmExpression* lhs = isSgAsmBinaryMultiply(e)->get_lhs();
@@ -555,11 +557,8 @@ struct X86InstructionSemantics {
                 return readMemory<16>(getSegregFromMemoryReference(isSgAsmMemoryReferenceExpression(e)),
                                       readEffectiveAddress(e), policy.true_());
             }
-            case V_SgAsmByteValueExpression:
-            case V_SgAsmWordValueExpression:
-            case V_SgAsmDoubleWordValueExpression:
-            case V_SgAsmQuadWordValueExpression: {
-                uint64_t val = SageInterface::getAsmSignedConstant(isSgAsmValueExpression(e));
+            case V_SgAsmIntegerValueExpression: {
+                uint64_t val = isSgAsmIntegerValueExpression(e)->get_signedValue();
                 return number<16>(val & 0xFFFFU);
             }
             default: {
@@ -572,15 +571,15 @@ struct X86InstructionSemantics {
     /* Returns a 32-bit value described by an instruction operand. */
     Word(32) read32(SgAsmExpression* e) {
         switch (e->variantT()) {
-            case V_SgAsmx86RegisterReferenceExpression: {
-                SgAsmx86RegisterReferenceExpression* rre = isSgAsmx86RegisterReferenceExpression(e);
+            case V_SgAsmDirectRegisterExpression: {
+                SgAsmDirectRegisterExpression* rre = isSgAsmDirectRegisterExpression(e);
                 return policy.readRegister<32>(rre->get_descriptor());
             }
             case V_SgAsmBinaryAdd: {
                 return policy.add(read32(isSgAsmBinaryAdd(e)->get_lhs()), read32(isSgAsmBinaryAdd(e)->get_rhs()));
             }
             case V_SgAsmBinaryMultiply: {
-                SgAsmByteValueExpression* rhs = isSgAsmByteValueExpression(isSgAsmBinaryMultiply(e)->get_rhs());
+                SgAsmIntegerValueExpression* rhs = isSgAsmIntegerValueExpression(isSgAsmBinaryMultiply(e)->get_rhs());
                 if (!rhs)
                     throw Exception("byte value expression expected", current_instruction);
                 SgAsmExpression* lhs = isSgAsmBinaryMultiply(e)->get_lhs();
@@ -590,10 +589,7 @@ struct X86InstructionSemantics {
                 return readMemory<32>(getSegregFromMemoryReference(isSgAsmMemoryReferenceExpression(e)),
                                       readEffectiveAddress(e), policy.true_());
             }
-            case V_SgAsmByteValueExpression:
-            case V_SgAsmWordValueExpression:
-            case V_SgAsmDoubleWordValueExpression:
-            case V_SgAsmQuadWordValueExpression: {
+            case V_SgAsmIntegerValueExpression: {
                 uint64_t val = SageInterface::getAsmSignedConstant(isSgAsmValueExpression(e));
                 return number<32>(val & 0xFFFFFFFFU);
             }
@@ -607,8 +603,8 @@ struct X86InstructionSemantics {
     /* Writes the specified eight-bit value to the location specified by an instruction operand. */
     void write8(SgAsmExpression* e, const Word(8)& value) {
         switch (e->variantT()) {
-            case V_SgAsmx86RegisterReferenceExpression: {
-                SgAsmx86RegisterReferenceExpression* rre = isSgAsmx86RegisterReferenceExpression(e);
+            case V_SgAsmDirectRegisterExpression: {
+                SgAsmDirectRegisterExpression* rre = isSgAsmDirectRegisterExpression(e);
                 policy.writeRegister(rre->get_descriptor(), value);
                 break;
             }
@@ -627,8 +623,8 @@ struct X86InstructionSemantics {
     /* Writes the specified 16-bit value to the location specified by an instruction operand. */
     void write16(SgAsmExpression* e, const Word(16)& value) {
         switch (e->variantT()) {
-            case V_SgAsmx86RegisterReferenceExpression: {
-                SgAsmx86RegisterReferenceExpression* rre = isSgAsmx86RegisterReferenceExpression(e);
+            case V_SgAsmDirectRegisterExpression: {
+                SgAsmDirectRegisterExpression* rre = isSgAsmDirectRegisterExpression(e);
                 policy.writeRegister(rre->get_descriptor(), value);
                 break;
             }
@@ -647,8 +643,8 @@ struct X86InstructionSemantics {
     /* Writes the specified 32-bit value to the location specified by an instruction operand. */
     void write32(SgAsmExpression* e, const Word(32)& value) {
         switch (e->variantT()) {
-            case V_SgAsmx86RegisterReferenceExpression: {
-                SgAsmx86RegisterReferenceExpression* rre = isSgAsmx86RegisterReferenceExpression(e);
+            case V_SgAsmDirectRegisterExpression: {
+                SgAsmDirectRegisterExpression* rre = isSgAsmDirectRegisterExpression(e);
                 policy.writeRegister(rre->get_descriptor(), value);
                 break;
             }
@@ -744,10 +740,10 @@ struct X86InstructionSemantics {
 #if _MSC_VER
         // tps (02/01/2010) : fixme : Commented this out for Windows - there is a problem with the try:
         // error C2590: 'translate' : only a constructor can have a base/member initializer list
-    virtual void translate(SgAsmx86Instruction* insn)  {
+    virtual void translate(SgAsmX86Instruction* insn)  {
         }
 #else
-    virtual void translate(SgAsmx86Instruction* insn) try {
+    virtual void translate(SgAsmX86Instruction* insn) try {
         orig_eip = readRegister<32>(REG_EIP);
         writeRegister(REG_EIP, policy.add(orig_eip, policy.number<32>(insn->get_size())));
         X86InstructionKind kind = insn->get_kind();
@@ -1597,7 +1593,7 @@ struct X86InstructionSemantics {
                 writeRegister(REG_AF, undefined_<1>());
                 writeRegister(REG_PF, undefined_<1>());
                 
-                if (isSgAsmMemoryReferenceExpression(operands[0]) && isSgAsmx86RegisterReferenceExpression(operands[1])) {
+                if (isSgAsmMemoryReferenceExpression(operands[0]) && isSgAsmRegisterReferenceExpression(operands[1])) {
                     /* Special case allowing multi-word offsets into memory */
                     Word(32) addr = readEffectiveAddress(operands[0]);
                     int numBytes = numBytesInAsmType(operands[1]->get_type());
@@ -1642,7 +1638,7 @@ struct X86InstructionSemantics {
                 writeRegister(REG_AF, undefined_<1>());
                 writeRegister(REG_PF, undefined_<1>());
                 
-                if (isSgAsmMemoryReferenceExpression(operands[0]) && isSgAsmx86RegisterReferenceExpression(operands[1])) {
+                if (isSgAsmMemoryReferenceExpression(operands[0]) && isSgAsmRegisterReferenceExpression(operands[1])) {
                     /* Special case allowing multi-word offsets into memory */
                     Word(32) addr = readEffectiveAddress(operands[0]);
                     int numBytes = numBytesInAsmType(operands[1]->get_type());
@@ -1696,7 +1692,7 @@ struct X86InstructionSemantics {
                 writeRegister(REG_AF, undefined_<1>());
                 writeRegister(REG_PF, undefined_<1>());
                 
-                if (isSgAsmMemoryReferenceExpression(operands[0]) && isSgAsmx86RegisterReferenceExpression(operands[1])) {
+                if (isSgAsmMemoryReferenceExpression(operands[0]) && isSgAsmRegisterReferenceExpression(operands[1])) {
                     /* Special case allowing multi-word offsets into memory */
                     Word(32) addr = readEffectiveAddress(operands[0]);
                     int numBytes = numBytesInAsmType(operands[1]->get_type());
@@ -2414,7 +2410,7 @@ struct X86InstructionSemantics {
             case x86_int: {
                 if (operands.size()!=1)
                     throw Exception("instruction must have one operand", insn);
-                SgAsmByteValueExpression* bv = isSgAsmByteValueExpression(operands[0]);
+                SgAsmIntegerValueExpression* bv = isSgAsmIntegerValueExpression(operands[0]);
                 if (!bv)
                     throw Exception("operand must be a byte value expression", insn);
                 policy.interrupt(bv->get_value());
@@ -2455,8 +2451,8 @@ struct X86InstructionSemantics {
     }
 #endif
 
-    void processInstruction(SgAsmx86Instruction* insn) {
-        ROSE_ASSERT(insn);
+    void processInstruction(SgAsmX86Instruction* insn) {
+        ASSERT_not_null(insn);
         current_instruction = insn;
         policy.startInstruction(insn);
         translate(insn);
@@ -2467,13 +2463,13 @@ struct X86InstructionSemantics {
         if (begin == end) return;
         policy.startBlock(stmts[begin]->get_address());
         for (size_t i = begin; i < end; ++i) {
-            processInstruction(isSgAsmx86Instruction(stmts[i]));
+            processInstruction(isSgAsmX86Instruction(stmts[i]));
         }
         policy.finishBlock(stmts[begin]->get_address());
     }
 
     static bool isRepeatedStringOp(SgAsmStatement* s) {
-        SgAsmx86Instruction* insn = isSgAsmx86Instruction(s);
+        SgAsmX86Instruction* insn = isSgAsmX86Instruction(s);
         if (!insn) return false;
         switch (insn->get_kind()) {
             case x86_repe_cmpsb: return true;
@@ -2515,7 +2511,7 @@ struct X86InstructionSemantics {
     }
 
     static bool isHltOrInt(SgAsmStatement* s) {
-        SgAsmx86Instruction* insn = isSgAsmx86Instruction(s);
+        SgAsmX86Instruction* insn = isSgAsmX86Instruction(s);
         if (!insn) return false;
         switch (insn->get_kind()) {
             case x86_hlt: return true;
@@ -2539,7 +2535,7 @@ struct X86InstructionSemantics {
                 processBlock(stmts, i, i + 1);
                 ++i;
             }
-            ROSE_ASSERT(i != oldI);
+            ASSERT_require(i != oldI);
         }
     }
 
@@ -2547,6 +2543,8 @@ struct X86InstructionSemantics {
 
 #undef Word
         
-    } /*namespace*/
-} /*namespace*/
+} // namespace
+} // namespace
+} // namespace
+
 #endif /* ROSE_X86INSTRUCTIONSEMANTICS_H */

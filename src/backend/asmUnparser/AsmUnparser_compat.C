@@ -2,6 +2,9 @@
 #include "sage3basic.h"
 #include "AsmUnparser_compat.h"
 #include "BinaryControlFlow.h"
+#include "Diagnostics.h"
+
+using namespace rose::BinaryAnalysis;
 
 /* FIXME: this should be a SgAsmInstruction class method. */
 std::string unparseInstruction(SgAsmInstruction* insn, const AsmUnparser::LabelMap *labels, const RegisterDictionary *registers) {
@@ -25,23 +28,24 @@ std::string unparseInstruction(SgAsmInstruction* insn, const AsmUnparser::LabelM
 std::string unparseInstructionWithAddress(SgAsmInstruction* insn, const AsmUnparser::LabelMap *labels,
                                           const RegisterDictionary *registers) {
     if (!insn) return "BOGUS:NULL";
-    return StringUtility::intToHex(insn->get_address()) + ":" + unparseInstruction(insn, labels, registers);
+    return StringUtility::addrToString(insn->get_address()) + ": " + unparseInstruction(insn, labels, registers);
 }
 
 /* FIXME: This should be a SgAsmInstruction class method. */
 std::string unparseMnemonic(SgAsmInstruction *insn) {
     switch (insn->variantT()) {
-        case V_SgAsmx86Instruction:
-            return unparseX86Mnemonic(isSgAsmx86Instruction(insn));
+        case V_SgAsmX86Instruction:
+            return unparseX86Mnemonic(isSgAsmX86Instruction(insn));
         case V_SgAsmArmInstruction:
             return unparseArmMnemonic(isSgAsmArmInstruction(insn));
         case V_SgAsmPowerpcInstruction:
             return unparsePowerpcMnemonic(isSgAsmPowerpcInstruction(insn));
         case V_SgAsmMipsInstruction:
             return unparseMipsMnemonic(isSgAsmMipsInstruction(insn));
+        case V_SgAsmM68kInstruction:
+            return unparseM68kMnemonic(isSgAsmM68kInstruction(insn));
         default:
-            std::cerr <<"Unhandled variant " <<insn->class_name() <<std::endl;
-            abort();
+            ASSERT_not_reachable("unhandled variant: " + insn->class_name());
     }
 #ifdef _MSC_VER
     return "error in unparseMnemonic"; /*MSC doesn't know that abort() doesn't return*/
@@ -61,7 +65,7 @@ std::string unparseExpression(SgAsmExpression *expr, const AsmUnparser::LabelMap
         return unparseX86Expression(expr, labels, registers, false);
         
     switch (insn->variantT()) {
-        case V_SgAsmx86Instruction:
+        case V_SgAsmX86Instruction:
             return unparseX86Expression(expr, labels, registers);
         case V_SgAsmArmInstruction:
             return unparseArmExpression(expr, labels, registers);
@@ -69,9 +73,10 @@ std::string unparseExpression(SgAsmExpression *expr, const AsmUnparser::LabelMap
             return unparsePowerpcExpression(expr, labels, registers);
         case V_SgAsmMipsInstruction:
             return unparseMipsExpression(expr, labels, registers);
+        case V_SgAsmM68kInstruction:
+            return unparseM68kExpression(expr, labels, registers);
         default:
-            std::cerr <<"Unhandled variant " <<insn->class_name() << std::endl;
-            abort();
+            ASSERT_not_reachable("unhandled variant: " + insn->class_name());
     }
 #ifdef _MSC_VER
     return "ERROR in unparseExpression()"; /*MSC doesn't know that abort() doesn't return*/
@@ -85,10 +90,11 @@ unparseAsmStatement(SgAsmStatement* stmt)
     std::ostringstream s;
     AsmUnparser u;
     switch (stmt->variantT()) {
-        case V_SgAsmx86Instruction:
+        case V_SgAsmX86Instruction:
         case V_SgAsmArmInstruction:
         case V_SgAsmPowerpcInstruction:
         case V_SgAsmMipsInstruction:
+        case V_SgAsmM68kInstruction:
             u.unparse(s, isSgAsmInstruction(stmt));
             return s.str();
         case V_SgAsmBlock:
@@ -98,8 +104,7 @@ unparseAsmStatement(SgAsmStatement* stmt)
             u.unparse(s, isSgAsmFunction(stmt));
             return s.str();
         default:
-            std::cerr <<"Unhandled variant " <<stmt->class_name() <<std::endl;
-            abort();
+            ASSERT_not_reachable("unhandled variant: " + stmt->class_name());
     }
 #ifdef _MSC_VER
     return "ERROR in unparseAsmStatement()"; /*MSC doesn't know that abort() doesn't return*/
@@ -112,15 +117,15 @@ unparseAsmInterpretation(SgAsmInterpretation* interp)
     AsmUnparser unparser;
 
     // Build a control flow graph, but exclude all the basic blocks that are marked as disassembly leftovers.
-    struct NoLeftovers: public BinaryAnalysis::ControlFlow::VertexFilter {
-        virtual bool operator()(BinaryAnalysis::ControlFlow*, SgAsmNode *node) {
+    struct NoLeftovers: public rose::BinaryAnalysis::ControlFlow::VertexFilter {
+        virtual bool operator()(rose::BinaryAnalysis::ControlFlow*, SgAsmNode *node) {
             SgAsmFunction *func = SageInterface::getEnclosingNode<SgAsmFunction>(node);
             return func && 0==(func->get_reason() & SgAsmFunction::FUNC_LEFTOVERS);
         }
     } vertex_filter;
-    BinaryAnalysis::ControlFlow cfg_analyzer;
+    rose::BinaryAnalysis::ControlFlow cfg_analyzer;
     cfg_analyzer.set_vertex_filter(&vertex_filter);
-    BinaryAnalysis::ControlFlow::Graph cfg;
+    rose::BinaryAnalysis::ControlFlow::Graph cfg;
     cfg_analyzer.build_block_cfg_from_ast(interp, cfg/*out*/);
 
     // We will try to disassemble static data blocks (i.e., disassembling data as instructions), but we need to choose an
@@ -145,7 +150,7 @@ unparseAsmInterpretation(SgAsmInterpretation* interp)
 void
 unparseAsmStatementToFile(const std::string& filename, SgAsmStatement* stmt)
 {
-    ROSE_ASSERT (stmt != NULL);
+    ASSERT_not_null(stmt);
     std::ofstream of(filename.c_str());
     of << unparseAsmStatement(stmt);
 }

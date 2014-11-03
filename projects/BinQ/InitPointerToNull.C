@@ -29,10 +29,10 @@ InitPointerToNull::visit(SgNode* node) {
     memoryRead.clear();
   } else
 
-  if (isSgAsmx86Instruction(node) && isSgAsmx86Instruction(node)->get_kind() == x86_mov) {
+  if (isSgAsmX86Instruction(node) && isSgAsmX86Instruction(node)->get_kind() == x86_mov) {
     // this is the address of the mov instruction prior to the call
     //rose_addr_t resolveAddr=0;
-    SgAsmx86Instruction* inst = isSgAsmx86Instruction(node);
+    SgAsmX86Instruction* inst = isSgAsmX86Instruction(node);
     SgNode* instBlock = NULL;
     if (project) 
       instBlock= isSgAsmBlock(inst->get_parent());
@@ -54,8 +54,8 @@ InitPointerToNull::visit(SgNode* node) {
     SgAsmExpressionPtrList::iterator itOP = opsList.begin();
     SgAsmMemoryReferenceExpression* memL=NULL;
     SgAsmMemoryReferenceExpression* memR=NULL;
-    SgAsmx86RegisterReferenceExpression* regL=NULL;
-    SgAsmx86RegisterReferenceExpression* regR=NULL;
+    SgAsmRegisterReferenceExpression* regL=NULL;
+    SgAsmRegisterReferenceExpression* regR=NULL;
     SgAsmValueExpression* Val = NULL;
     int iteration=0;
     for (;itOP!=opsList.end();++itOP) {
@@ -64,13 +64,13 @@ InitPointerToNull::visit(SgNode* node) {
       if (iteration==1) {
 	// right hand side
 	memR = isSgAsmMemoryReferenceExpression(exp);
-	regR = isSgAsmx86RegisterReferenceExpression(exp);
+	regR = isSgAsmRegisterReferenceExpression(exp);
 	Val = isSgAsmValueExpression(exp);
       }
       if (iteration==0) {
 	// left hand side
 	memL = isSgAsmMemoryReferenceExpression(exp);
-	regL = isSgAsmx86RegisterReferenceExpression(exp);
+	regL = isSgAsmRegisterReferenceExpression(exp);
 	iteration++;
       }
     } //for

@@ -73,7 +73,7 @@ void RoseBin_CompareAnalysis::create_map_functions() {
 bool RoseBin_CompareAnalysis::instruction_filter(SgAsmStatement* stat, string func_name, string *output) {
   // return true if valid instruction, false if part of filter
   bool isValidInstr=true;
-  SgAsmx86Instruction* inst = isSgAsmx86Instruction(stat);
+  SgAsmX86Instruction* inst = isSgAsmX86Instruction(stat);
   if (inst==NULL) {
     cerr << " filter function produced a statement that is not an instruction " << endl;
     exit(0);
@@ -89,7 +89,7 @@ bool RoseBin_CompareAnalysis::instruction_filter(SgAsmStatement* stat, string fu
     SgAsmOperandList* opList = inst->get_operandList();
     SgAsmExpressionPtrList exprList = opList->get_operands();
     SgAsmExpression* binExp = *(exprList.begin());
-    SgAsmx86RegisterReferenceExpression* refExp = isSgAsmx86RegisterReferenceExpression(binExp); 
+    SgAsmRegisterReferenceExpression* refExp = isSgAsmRegisterReferenceExpression(binExp); 
     X86RegisterClass cl = (X86RegisterClass)refExp->get_descriptor().get_major();
     int reg = refExp->get_descriptor().get_minor();
     if (cl == x86_regclass_gpr && reg==x86_gpr_bp) 
@@ -103,7 +103,7 @@ bool RoseBin_CompareAnalysis::instruction_filter(SgAsmStatement* stat, string fu
       SgAsmOperandList* opList = inst->get_operandList();
       SgAsmExpressionPtrList exprList = opList->get_operands();
       SgAsmExpression* binExp = *(exprList.begin());
-      SgAsmx86RegisterReferenceExpression* refExp = isSgAsmx86RegisterReferenceExpression(binExp); 
+      SgAsmRegisterReferenceExpression* refExp = isSgAsmRegisterReferenceExpression(binExp); 
       X86RegisterClass cl = (X86RegisterClass)refExp->get_descriptor().get_major();
       int reg = refExp->get_descriptor().get_minor();
       if (cl == x86_regclass_gpr && reg==x86_gpr_cx) 
@@ -129,7 +129,7 @@ bool RoseBin_CompareAnalysis::instruction_filter(SgAsmStatement* stat, string fu
           SgAsmExpression* binExp = (*it);
           ROSE_ASSERT(binExp);
           //cerr << " type " << binExp->class_name() << endl;
-          SgAsmx86RegisterReferenceExpression* refExp = isSgAsmx86RegisterReferenceExpression(binExp);
+          SgAsmRegisterReferenceExpression* refExp = isSgAsmRegisterReferenceExpression(binExp);
           if (refExp) {
             //ROSE_ASSERT(refExp);
             X86RegisterClass cl = (X86RegisterClass)refExp->get_descriptor().get_major();
@@ -162,7 +162,7 @@ bool RoseBin_CompareAnalysis::instruction_filter(SgAsmStatement* stat, string fu
             SgAsmExpression* binExp = (*it);
             ROSE_ASSERT(binExp);
             //cerr << " type " << binExp->class_name() << endl;
-            SgAsmx86RegisterReferenceExpression* refExp = isSgAsmx86RegisterReferenceExpression(binExp);
+            SgAsmRegisterReferenceExpression* refExp = isSgAsmRegisterReferenceExpression(binExp);
             SgAsmValueExpression* valExp = isSgAsmValueExpression(binExp);
             if (refExp && iteration==0) {
               X86RegisterClass cl = (X86RegisterClass)refExp->get_descriptor().get_major();
@@ -203,24 +203,19 @@ bool RoseBin_CompareAnalysis::instruction_filter(SgAsmStatement* stat, string fu
 string RoseBin_CompareAnalysis::checkVariable(SgAsmValueExpression* rhs) {
   string valStr="";
   if (rhs) {
-    if ( isSgAsmByteValueExpression(rhs)) {
-      short val = isSgAsmByteValueExpression(rhs)->get_value();
+      SgAsmIntegerValueExpression *ival = isSgAsmIntegerValueExpression(rhs);
+    if ( ival && (8==ival->get_significantBits() || 32==ival->get_significantBits())) {
+      short val = isSgAsmIntegerValueExpression(rhs)->get_value();
       //cerr << " checking local short variable at bp " << RoseBin_support::ToString(val) << endl;
       valStr = RoseBin_support::ToString(val);
-    } else
-      if (isSgAsmDoubleFloatValueExpression(rhs)) {
-        double val = isSgAsmDoubleFloatValueExpression(rhs)->get_value();
+    } else if (isSgAsmFloatValueExpression(rhs)) {
+        double val = isSgAsmFloatValueExpression(rhs)->get_nativeValue();
         //cerr << " checking local float variable at bp " << RoseBin_support::ToString(val) << endl;
         valStr = RoseBin_support::ToString(val);
-      } else
-        if (isSgAsmDoubleWordValueExpression(rhs)) {
-          int val = isSgAsmDoubleWordValueExpression(rhs)->get_value();
-          //cerr << " checking local int variable at bp " << RoseBin_support::ToString(val) << endl;
-          valStr = RoseBin_support::ToString(val);
-        } else {
+    } else {
           cerr << " the type of value is currently not handled - CompareAnalysis " << endl;
           exit(0);
-        }
+    }
   } else {
     cerr << " >> cannot check for variable location 3. " << endl;
     exit(0);
@@ -303,22 +298,15 @@ string RoseBin_CompareAnalysis::resolve_binaryInstruction(SgAsmInstruction* mov,
   SgAsmOperandList* opList = mov->get_operandList();
   SgAsmExpressionPtrList exprList = opList->get_operands();
   SgAsmExpressionPtrList::iterator it = exprList.begin();
-  //  SgAsmx86RegisterReferenceExpression* myexp=NULL;
   int iteration=0;
   string value="";
   for (;it!=exprList.end();it++) {
     SgAsmExpression* binExp = (*it);
     ROSE_ASSERT(binExp);
     string str="";
-    //myexp = isSgAsmx86RegisterReferenceExpression(binExp);
-    //if (myexp) {
-    // register
-    //SgAsmx86RegisterReferenceExpression::x86_register_enum reg = myexp->get_x86_register_code();
-    //string regName = resolveRegister(reg);
-    //SgAsmMemoryReferenceExpression* memref = isSgAsmMemoryReferenceExpression(myexp->get_offset());
     SgAsmMemoryReferenceExpression* memref = isSgAsmMemoryReferenceExpression(binExp);
     if (memref) {
-      SgAsmx86RegisterReferenceExpression* myexp = isSgAsmx86RegisterReferenceExpression(memref->get_segment());
+      SgAsmRegisterReferenceExpression* myexp = isSgAsmRegisterReferenceExpression(memref->get_segment());
       if (myexp) {
         // register
         string regName = resolveRegister(myexp->get_descriptor());
@@ -367,7 +355,7 @@ bool RoseBin_CompareAnalysis::isReturnStmt(SgNode* srcNode,
   bool isreturn=false;
   // check if return matches
   SgReturnStmt* returnS = isSgReturnStmt(srcNode);
-  SgAsmx86Instruction* retBin = isSgAsmx86Instruction(binNode);
+  SgAsmX86Instruction* retBin = isSgAsmX86Instruction(binNode);
   if (returnS && retBin && retBin->get_kind() == x86_ret ) {
     *output+= " !! returnStatement ............... \n";
     nodes_matched++;
@@ -391,7 +379,7 @@ bool RoseBin_CompareAnalysis::isFunctionCall(SgNode* srcNode,
   cerr << "   inside isFunctionCall " << endl;
   SgFunctionCallExp* srcCall = isSgFunctionCallExp(srcNode);
   if (srcCall !=NULL ) {
-    SgAsmx86Instruction* binCall = isSgAsmx86Instruction(binNode);
+    SgAsmX86Instruction* binCall = isSgAsmX86Instruction(binNode);
     if (binCall && binCall->get_kind() == x86_call) {
       *output+= " !! functionCall ............... \n";
       nodes_matched++;
@@ -413,7 +401,7 @@ bool RoseBin_CompareAnalysis::isSgPlusPlus(SgNode* srcNode,
   SgPlusPlusOp* srcCall = isSgPlusPlusOp(srcNode);
   if (srcCall !=NULL ) {
     cerr << "   inside isSgPlusPlus found PlusPlus " << endl;
-    SgAsmx86Instruction* binCall = isSgAsmx86Instruction(binNode);
+    SgAsmX86Instruction* binCall = isSgAsmX86Instruction(binNode);
     if (binCall && binCall->get_kind() == x86_inc) {
       *output+= " !! SgPlusPlus ............... \n";
       nodes_matched++;
@@ -454,7 +442,7 @@ bool RoseBin_CompareAnalysis::isVariableDeclaration(SgNode* srcNode,
   bool isvar=false;
   cerr << "   inside isVariableDeclaration " << endl;
   SgVariableDeclaration* varDecl = isSgVariableDeclaration(srcNode);
-  SgAsmx86Instruction* mov = isSgAsmx86Instruction(binNode);
+  SgAsmX86Instruction* mov = isSgAsmX86Instruction(binNode);
   // check the children of the varDecl , make a disctinction between
   // a) the variable is uninitialized
   // b) the variable is initialized (value on right side) , i.e. there is no corresponding binNode ( hence skip this source node)
@@ -522,7 +510,8 @@ bool RoseBin_CompareAnalysis::isVariableDeclaration(SgNode* srcNode,
         SgAssignInitializer* assInit = isSgAssignInitializer(init);
         ROSE_ASSERT(assInit);
         SgExpression* op = assInit->get_operand();
-        if (isSgIntVal(op) && isSgAsmDoubleWordValueExpression(valExp)) {
+        if (isSgIntVal(op) && isSgAsmIntegerValueExpression(valExp) &&
+            32==isSgAsmIntegerValueExpression(valExp)->get_significantBits()) {
           // we got a integer && DoubleWord match
           nodes_matched++;
           isvar=true;
@@ -531,8 +520,8 @@ bool RoseBin_CompareAnalysis::isVariableDeclaration(SgNode* srcNode,
           mov->set_comment("mov SS:[" + name +"] , "+value);
           //local_last_variable = roh_val;
           isSgIntVal(op)->setAttribute(attributeName,createAttribute(2));
-          isSgAsmDoubleWordValueExpression(valExp)->setAttribute(attributeName,createAttribute(2));
-          isSgAsmx86RegisterReferenceExpression(refExp_Left)->setAttribute(attributeName,createAttribute(2));
+          isSgAsmIntegerValueExpression(valExp)->setAttribute(attributeName,createAttribute(2));
+          isSgAsmRegisterReferenceExpression(refExp_Left)->setAttribute(attributeName,createAttribute(2));
         }
       }
     }
@@ -547,7 +536,7 @@ void RoseBin_CompareAnalysis::resolve_bin_vardecl_or_assignment(bool &isVarDecl0
                                                                 bool &isVarDecl1,
                                                                 bool &isAssign0,
                                                                 bool &isAssign1,
-                                                                SgAsmx86Instruction* mov
+                                                                SgAsmX86Instruction* mov
                                                                 ) {
   SgAsmOperandList* opList = mov->get_operandList();
   SgAsmExpressionPtrList exprList = opList->get_operands();
@@ -558,7 +547,7 @@ void RoseBin_CompareAnalysis::resolve_bin_vardecl_or_assignment(bool &isVarDecl0
     ROSE_ASSERT(binExp);
     //cerr << " type " << binExp->class_name() << endl;
     if (iteration==0) {
-      refExp_Left = isSgAsmx86RegisterReferenceExpression(binExp);
+      refExp_Left = isSgAsmRegisterReferenceExpression(binExp);
       if (refExp_Left ) {
         // first operand is refExp (variabledecl || assignOp)
         if (refExp_Left->get_descriptor().get_major() == x86_regclass_segment &&
@@ -570,7 +559,7 @@ void RoseBin_CompareAnalysis::resolve_bin_vardecl_or_assignment(bool &isVarDecl0
       }
     }
     if (iteration==1) {
-      refExp_Right = isSgAsmx86RegisterReferenceExpression(binExp);
+      refExp_Right = isSgAsmRegisterReferenceExpression(binExp);
       valExp = isSgAsmValueExpression(binExp);
       if (valExp ) {
         // second operand is Value (variabledecl)
@@ -621,7 +610,7 @@ bool RoseBin_CompareAnalysis::isAssignOp(SgNode* srcNode,
   bool isassign=false;
   cerr << "   inside isAssignOp    " << endl;
   SgAssignOp* assign = isSgAssignOp(srcNode);
-  SgAsmx86Instruction* mov = isSgAsmx86Instruction(binNode);
+  SgAsmX86Instruction* mov = isSgAsmX86Instruction(binNode);
   if ( assign && mov && mov->get_kind() == x86_mov) {
     cerr << "      inside isAssignOp && mov " << endl;
     // in this case it is clear what is happening
@@ -788,7 +777,7 @@ SgExpression* RoseBin_CompareAnalysis::isExpression( SgExpression* expr,
     ROSE_ASSERT(binNode);
     cerr << "      checking isSgSubstractOp against " << binNode->class_name() << 
       " " << binNode << endl;
-    SgAsmx86Instruction* sub = isSgAsmx86Instruction(binNode);
+    SgAsmX86Instruction* sub = isSgAsmX86Instruction(binNode);
     if (sub && sub->get_kind() == x86_sub) {
       *output += "   !! subOp ............... \n" ;
       cerr << "      found SgSubtract : binCount: " << bin_count << endl;
@@ -835,7 +824,7 @@ SgExpression* RoseBin_CompareAnalysis::isExpression( SgExpression* expr,
       ROSE_ASSERT(binNode);
       cerr << "      checking isSgAddOp against " << binNode->class_name() << 
         " " << binNode << endl;
-      SgAsmx86Instruction* add = isSgAsmx86Instruction(binNode);
+      SgAsmX86Instruction* add = isSgAsmX86Instruction(binNode);
       if (add && add->get_kind() == x86_add) {
         cerr << "       found addOp. binCount: " << bin_count << endl;
         *output += "   !! addOp ............... \n" ;
@@ -881,9 +870,9 @@ SgExpression* RoseBin_CompareAnalysis::isExpression( SgExpression* expr,
         ROSE_ASSERT(binNodeNextNext);
         cerr << "      checking isSgMultiplyOp against " << binNode->class_name() <<
           " " << binNode << endl;
-        SgAsmx86Instruction* mov = isSgAsmx86Instruction(binNode);
-        SgAsmx86Instruction* shl = isSgAsmx86Instruction(binNodeNext);
-        SgAsmx86Instruction* lea = isSgAsmx86Instruction(binNodeNextNext);
+        SgAsmX86Instruction* mov = isSgAsmX86Instruction(binNode);
+        SgAsmX86Instruction* shl = isSgAsmX86Instruction(binNodeNext);
+        SgAsmX86Instruction* lea = isSgAsmX86Instruction(binNodeNextNext);
         if (mov && mov->get_kind() == x86_mov && shl && shl->get_kind() == x86_shl) {
           *output += "   !! multiplyOp ............... \n" ;
           cerr << "       found multiOp. binCount: " << bin_count << endl;
@@ -929,7 +918,7 @@ SgExpression* RoseBin_CompareAnalysis::isExpression( SgExpression* expr,
           binNode = bin_statements[(bin_count)];
           ROSE_ASSERT(binNode);
           cerr << "      checking isSgDivideOp against " << binNode->class_name() << endl;
-          SgAsmx86Instruction* shr = isSgAsmx86Instruction(binNode);
+          SgAsmX86Instruction* shr = isSgAsmX86Instruction(binNode);
           if (shr && shr->get_kind() == x86_shr) {
             *output += "   !! divideOp ............... \n" ;
             (nodes_matched)++;

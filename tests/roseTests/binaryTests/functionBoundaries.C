@@ -10,6 +10,8 @@
 
 #include <inttypes.h>
 
+using namespace rose::BinaryAnalysis;
+
 /* Example partitioner that demonstrates how to write a user-defined function detector that uses at least one protected data
  * member (the instruction cache, in this case).  Note that this is a contrived example since the instruction map is also
  * available via Partitioner::get_instructions(). */
@@ -27,11 +29,11 @@ private:
         ROSE_ASSERT(p!=NULL);
         for (InstructionMap::const_iterator ii=p->insns.begin(); ii!=p->insns.end(); ii++) {
             rose_addr_t addr = ii->first;
-            SgAsmx86Instruction *insn = isSgAsmx86Instruction(ii->second);
+            SgAsmX86Instruction *insn = isSgAsmX86Instruction(ii->second);
             if (!insn || insn->get_kind()!=x86_push) continue;
             SgAsmExpressionPtrList &operands = insn->get_operandList()->get_operands();
             if (operands.size()!=1) continue;
-            SgAsmx86RegisterReferenceExpression *rre = isSgAsmx86RegisterReferenceExpression(operands[0]);
+            SgAsmRegisterReferenceExpression *rre = isSgAsmRegisterReferenceExpression(operands[0]);
             if (!rre ||
                 rre->get_descriptor().get_major() != x86_regclass_gpr ||
                 rre->get_descriptor().get_minor() != x86_gpr_bp)

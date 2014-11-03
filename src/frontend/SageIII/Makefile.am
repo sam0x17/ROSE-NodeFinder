@@ -91,7 +91,7 @@ CXX_TEMPLATE_REPOSITORY_PATH = .
 # This will hopefull avoid a linking problem where multiple files
 # are called preproc.o (from here and from EDG).
 EXTRA_DIST = CMakeLists.txt preproc-c.ll docs rtiHelpers.h attributeListMap.h \
-             advanced_preprocessing_hooks.h rose_attributes_list.h dwarfSupport.h \
+             advanced_preprocessing_hooks.h rose_attributes_list.h dwarfSupport.h atermSupport.h \
              omplexer.cc ompparser.cc ompparser.h sage3basic.hhh fileoffsetbits.h rosedll.h \
 	     ompAstConstruction.h PolicyControl.txt Utf8.h
 CLEANFILES = haveRosettaGeneratedSource
@@ -121,6 +121,7 @@ GENERATED_SOURCE = \
 else
 GENERATED_SOURCE = \
 	Cxx_Grammar.h \
+	Cxx_GrammarAtermSupport.C \
 	Cxx_Grammar.C \
 	Cxx_GrammarRTI.C \
 	Cxx_GrammarMemoryPoolSupport.C \
@@ -186,6 +187,8 @@ libsage3Sources = \
    ompFortranParser.C \
    ompAstConstruction.cpp \
    dwarfSupport.C \
+   atermSupport.C \
+   nodeBuildFunctionsForAterms.C \
    rose_graph_support.C \
    $(fSageSupport_la_sources)
 endif
@@ -299,19 +302,19 @@ test_roseh: roseh
 
 # DQ (10/18/2007): Added AST_FILE_IO.h StorageClasses.h
 # Removed sla.h (redundant with location in src/util/commandlineProcessing/sla.h)
-include_HEADERS = \
+pkginclude_HEADERS = \
    sage3.h sage3basic.h rose_attributes_list.h \
    attachPreprocessingInfo.h \
    attachPreprocessingInfoTraversal.h \
    attach_all_info.h manglingSupport.h C++_include_files.h \
    fixupCopy.h \
    general_token_defs.h rtiHelpers.h \
-   OmpAttribute.h omp.h dwarfSupport.h \
+   OmpAttribute.h omp.h dwarfSupport.h atermSupport.h \
    omp_lib_kinds.h omp_lib.h sage3basic.hhh rosedefs.h  fileoffsetbits.h rosedll.h \
    $(fSageSupport_includeHeaders)
 
 # DQ (4/5/2009): Moved rose_paths.h to src/util (where the source file is located).
-nodist_include_HEADERS = \
+nodist_pkginclude_HEADERS = \
    Cxx_Grammar.h \
    Cxx_GrammarMemoryPoolSupport.h \
    Cxx_GrammarTreeTraversalAccessEnums.h \

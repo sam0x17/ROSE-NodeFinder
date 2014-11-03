@@ -190,7 +190,7 @@ get_position_in_register(const RegisterDescriptor &rdesc) {
 }
 
 bool
-RoseBin_Emulate::evaluateInstruction( SgAsmx86Instruction* binInst, string& operands) {
+RoseBin_Emulate::evaluateInstruction( SgAsmX86Instruction* binInst, string& operands) {
   SgAsmOperandList* opList = binInst->get_operandList();
   ROSE_ASSERT(opList);
   //string operands = "";
@@ -248,7 +248,7 @@ RoseBin_Emulate::evaluateInstruction( SgAsmx86Instruction* binInst, string& oper
 
 
   int counter=0;
-  SgAsmx86RegisterReferenceExpression* refExpr =NULL;
+  SgAsmRegisterReferenceExpression* refExpr =NULL;
   std::pair<X86RegisterClass, int>  code ;
   RoseBin_support::X86PositionInRegister pos ;
 
@@ -262,7 +262,7 @@ RoseBin_Emulate::evaluateInstruction( SgAsmx86Instruction* binInst, string& oper
     //string result = unparser->resolveOperand(expr,&type);
     if (counter==0) {
       // left hand side *************************************************************
-      refExpr = isSgAsmx86RegisterReferenceExpression(expr);
+      refExpr = isSgAsmRegisterReferenceExpression(expr);
 
       // check what it could be
       // ******** 1. its a RegisterReferenceExpression on the left side
@@ -304,7 +304,7 @@ RoseBin_Emulate::evaluateInstruction( SgAsmx86Instruction* binInst, string& oper
     } else {
       // right hand side ************************************************************
       SgAsmValueExpression* valExp = isSgAsmValueExpression(expr);
-      SgAsmx86RegisterReferenceExpression* refExprR = isSgAsmx86RegisterReferenceExpression(expr);
+      SgAsmRegisterReferenceExpression* refExprR = isSgAsmRegisterReferenceExpression(expr);
       uint8_t b_val=0xF;
       uint16_t w_val=0xFF;
       uint32_t dw_val=0xFFFF;
@@ -795,7 +795,7 @@ RoseBin_Emulate::run(string& name, SgGraphNode* node,
       cout << "EMULATE BEFORE::  name: " << unp_name << " \n regs: " << regs << endl;
     }
     string eval = "";
-    bool success=evaluateInstruction(isSgAsmx86Instruction(inst), eval);
+    bool success=evaluateInstruction(isSgAsmX86Instruction(inst), eval);
     //node->append_properties(SgGraph::name,unp_name);
     node->append_properties(SgGraph::eval,eval);
     string regs = evaluateRegisters();

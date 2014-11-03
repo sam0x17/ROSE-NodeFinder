@@ -110,6 +110,14 @@ class GrammarString
   const std::string& getTypeNameString() const;
   const std::string& getVariableNameString() const;
   const std::string& getDefaultInitializerString() const;
+  // MS 2014: 
+  std::string infoFieldsToString() const;
+
+// DQ (10/8/2014): This returns the name of the type where this data member is a container.
+// The container type is required as part of ATerm support in reading the ATerms and generating
+// the ROSE IR.
+  std::string containerElementTypeString(Terminal & node) const;
+  std::string containerAppendFunctionNameString(Terminal & node) const;
 
   void setIsInConstructorParameterList(ConstructParamEnum X);
   ConstructParamEnum getIsInConstructorParameterList() const;

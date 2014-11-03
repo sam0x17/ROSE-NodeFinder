@@ -23,6 +23,14 @@ TEST_WITH_ANSWER = $(top_srcdir)/scripts/test_with_answer
 TEST_SPECIMEN = $(srcdir)/specimen_tests.conf
 
 ###############################################################################################################################
+# These are tools that should be installed
+###############################################################################################################################
+
+bin_PROGRAMS += disassemble
+disassemble_SOURCES = disassemble.C linux_syscalls.C
+disassemble_LDADD = $(ROSE_LIBS_WITH_PATH) $(ROSE_SEPARATE_LIBS) $(RT_LIBS)
+
+###############################################################################################################################
 # The executables and their test cases...
 ###############################################################################################################################
 
@@ -210,16 +218,6 @@ noinst_PROGRAMS += subDominance
 subDominance_SOURCES = subDominance.C
 subDominance_LDADD = $(ROSE_LIBS_WITH_PATH) $(ROSE_SEPARATE_LIBS)
 
-# Disassemble a file containing bare instructions
-noinst_PROGRAMS += disassembleBuffer
-disassembleBuffer_SOURCES = disassembleBuffer.C
-disassembleBuffer_LDADD = $(ROSE_LIBS_WITH_PATH) $(ROSE_SEPARATE_LIBS) $(RT_LIBS)
-TEST_TARGETS += disassembleBuffer.passed
-EXTRA_DIST += disassembleBuffer.conf disassembleBuffer.ans
-disassembleBuffer.passed: disassembleBuffer.conf disassembleBuffer
-	@$(RTH_RUN) INPUT=buffer2.raw ADDRESS=0x8048310 $< $@
-
-
 noinst_PROGRAMS += testEtherInsns
 testEtherInsns_SOURCES = testEtherInsns.C
 testEtherInsns_LDADD = $(ROSE_LIBS_WITH_PATH) $(ROSE_SEPARATE_LIBS) $(RT_LIBS)
@@ -284,7 +282,7 @@ testAstIO_SOURCES=testAstIO.C
 testAstIO_LDADD=$(ROSE_LIBS_WITH_PATH) $(ROSE_SEPARATE_LIBS) $(RT_LIBS)
 TEST_TARGETS += testAstIO.passed
 EXTRA_DIST += testAstIO.conf
-MOSTLYCLEANFILES += i686-test1.O0.bin.ast
+MOSTLYCLEANFILES += i686-test1.O0.bin.ast i686-test1.O0.bin-1.dump i686-test1.O0.bin-2.dump
 testAstIO.passed: testAstIO.conf testAstIO
 	@$(RTH_RUN) INPUT=i686-test1.O0.bin $< $@
 
@@ -401,6 +399,14 @@ EXTRA_DIST += testCallDetection.ans
 testCallDetection.passed: $(BINARY_SAMPLES)/i386-fcalls testCallDetection
 	@$(RTH_RUN) CMD="./testCallDetection $<" ANS=$(srcdir)/testCallDetection.ans $(top_srcdir)/scripts/test_with_answer $@
 
+# Test analysis to see whether a function returns a value
+noinst_PROGRAMS += testReturnsValue
+testReturnsValue_SOURCES = testReturnsValue.C
+testReturnsValue_LDADD = $(LIBS_WITH_RPATH) $(ROSE_SEPARATE_LIBS)
+TEST_TARGETS += testReturnsValue.passed
+testReturnsValue.passed: $(BINARY_SAMPLES)/buffer2.bin testReturnsValue
+	@$(RTH_RUN) CMD="./testReturnsValue $<" $(TEST_EXIT_STATUS) $@
+
 # Unit tests for use-def (executed created below)
 TEST_TARGETS += usedef.passed
 EXTRA_DIST += usedef.ans usedef.conf
@@ -412,13 +418,13 @@ usedef.passed: usedef.conf symbolicSemantics2 $(BINARY_SAMPLES)/usedef
 		ANS="$(srcdir)/usedef.ans"								\
 		$< $@
 
-# # Test BitPattern<> class template
-# noinst_PROGRAMS += testBitPattern
-# testBitPattern_SOURCES = testBitPattern.C
-# testBitPattern_LDADD = $(LIBS_WITH_RPATH) $(ROSE_SEPARATE_LIBS)
-# TEST_TARGETS += testBitPattern.passed
-# testBitPattern.passed: testBitPattern
-# 	@$(RTH_RUN) CMD="./testBitPattern" $(TEST_EXIT_STATUS) $@
+# Test BitPattern<> class template
+noinst_PROGRAMS += testBitPattern
+testBitPattern_SOURCES = testBitPattern.C
+testBitPattern_LDADD = $(LIBS_WITH_RPATH) $(ROSE_SEPARATE_LIBS)
+TEST_TARGETS += testBitPattern.passed
+testBitPattern.passed: testBitPattern
+	@$(RTH_RUN) CMD="./testBitPattern" $(TEST_EXIT_STATUS) $@
 
 # Random number genertor tests
 noinst_PROGRAMS += testRNG
@@ -433,12 +439,6 @@ testRNG.passed: testRNG
 # Disassembly tests
 ###############################################################################################################################
 
-# "disassemble" is more of a tool than a test, so we install it.
-bin_PROGRAMS += disassemble
-disassemble_SOURCES = disassemble.C linux_syscalls.C
-disassemble_LDADD = $(ROSE_LIBS_WITH_PATH) $(ROSE_SEPARATE_LIBS) $(RT_LIBS)
-EXTRA_DIST += disassemble.conf
-
 # Disassembly of executable files (DOS, ELF, PE) of various architectures (amd64, Arm, Mips, M68k, PowerPC, x86)
 # MIPS specimens are currently failing a FIXME assertion in makeShadowRegister()
 # PowerPC specimens have lots of "XL-Form xoOpcode = 36 not handled!" and similar errors
@@ -446,7 +446,7 @@ disassemble1_specimens = $(filter-out $(any_any_mips_specimens) $(any_any_ppc_sp
 disassemble1_directory = $(top_srcdir)/binaries/samples
 disassemble1_test_targets = $(addprefix disassemble1_, $(addsuffix .passed, $(disassemble1_specimens)))
 disassemble1_answers = $(disassemble1_test_targets:.passed=.ans)
-EXTRA_DIST += $(disassemble1_answers)
+EXTRA_DIST += $(disassemble1_answers) disassemble.conf
 TEST_TARGETS += $(disassemble1_test_targets)
 
 $(disassemble1_test_targets): disassemble1_%.passed: $(disassemble1_directory)/% disassemble disassemble.conf disassemble1_%.ans
@@ -479,6 +479,7 @@ disassemble2_buffer2.raw.passed: $(disassemble2_directory)/buffer2.raw disassemb
 
 disassemble2_vm-final.raw.passed: $(disassemble2_directory)/vm-final.raw disassemble disassemble.conf disassemble2_vm-final.raw.ans
 	@$(RTH_RUN) \
+		DISABLED="This takes forever to run" \
 		TITLE="disassemble $(notdir $<) [$@]" \
 		USE_SUBDIR=yes \
 		EXE="$$(pwd)/disassemble" \
@@ -777,19 +778,104 @@ noinst_PROGRAMS += llvmTranscoder
 llvmTranscoder_SOURCES = llvmTranscoder.C
 llvmTranscoder_LDADD = $(ROSE_LIBS_WITH_PATH) $(ROSE_SEPARATE_LIBS) $(RT_LIBS)
 
+#-------------- basic test to make sure we can transcode each pre-compiled 32-bit x86 specimen
+
 llvmTranscoder_Specimens = $(elf_exe_x86_specimens) $(pe_exe_x86_specimens)
-llvmTranscoder_TestTargets = $(addprefix llvm_, $(addsuffix .passed, $(llvmTranscoder_Specimens)))
+llvmTranscoder_TestTargets = $(addprefix llvm-xcode-, $(addsuffix .passed, $(llvmTranscoder_Specimens)))
 TEST_TARGETS += $(llvmTranscoder_TestTargets)
 EXTRA_DIST += llvmTranscoder.conf
 
-$(llvmTranscoder_TestTargets): llvm_%.passed: $(BINARY_SAMPLES)/% llvmTranscoder llvmTranscoder.conf
+$(llvmTranscoder_TestTargets): llvm-xcode-%.passed: $(BINARY_SAMPLES)/% llvmTranscoder llvmTranscoder.conf
 	@$(RTH_RUN) \
 		TITLE="LLVM transcoder for $* [$@]" \
 		SPECIMEN="$(abspath $<)" \
 		$(srcdir)/llvmTranscoder.conf $@
 
+.PHONY: check-llvm-xcode
+check-llvm-xcode: $(llvmTranscoder_TestTargets)
+
+#--------------- tests that run LLVM analysis passes using LLVM's "opt" command
+
+llvmAnalysis_SpecimenDir = $(srcdir)/llvmAnalysisSpecimens
+llvmAnalysis_Specimens =			\
+	basicaa.c				\
+	basiccg.c				\
+	count-aa.c				\
+	domfrontier.c				\
+	domtree.c				\
+	dot-callgraph.c				\
+	dot-cfg-only.c				\
+	dot-cfg.c				\
+	globalsmodref-aa.c			\
+	instcount.c				\
+	intervals.c				\
+	iv-users.c				\
+	libcall-aa.c				\
+	loops.c					\
+	memdep.c				\
+	postdomfrontier.c			\
+	postdomtree.c				\
+	print-callgraph-sccs.c			\
+	print-cfg-sccs.c			\
+	print-dom-info.c			\
+	print-used-types.c			\
+	scalar-evolution.c
+
+llvmAnalysis_TestTargets = $(addprefix llvm-analysis-, $(addsuffix .passed, $(basename $(llvmAnalysis_Specimens))))
+EXTRA_DIST += $(addprefix $(llvmAnalysis_SpecimenDir), $(llvmAnalysis_Specimens))
+EXTRA_DIST += llvmAnalysis.conf
+
+# Do not run these tests automatically by "make check" because LLVM is not always installed.  Therefore, we
+# also need to mention the outputs in MOSTLYCLEANFILES.
+#TEST_TARGETS += $(llvmAnalysis_TestTargets)
+MOSTLYCLEANFILES += $(llvmAnalysis_TestTargets) $(llvmAnalysis_TestTargets:.passed=.failed)
+
+$(llvmAnalysis_TestTargets): llvm-analysis-%.passed: $(llvmAnalysis_SpecimenDir)/%.c llvmTranscoder disassemble
+	@$(RTH_RUN)											\
+		TITLE="LLVM analysis for $(notdir $<) [$@]"						\
+		USE_SUBDIR=yes										\
+		SPECIMEN="$<"										\
+		OPT_PASSES="$(shell perl -ne '/OPT:\s*(.*?)\s*(\*\/\s*)?$$/ and print qq{$$1\n}' $<)"	\
+		DISASSEMBLER=$(abspath disassemble)							\
+		TRANSCODER="$(abspath llvmTranscoder)"							\
+		$(srcdir)/llvmAnalysis.conf $@
+
+.PHONY: check-llvm-analysis
+check-llvm-analysis: $(llvmAnalysis_TestTargets)
+
+#-------------- all LLVM-specific tests
+
 .PHONY: check-llvm
-check-llvm: $(llvmTranscoder_TestTargets)
+check-llvm: $(llvmTranscoder_TestTargets) $(llvmAnalysis_TestTargets)
+
+
+
+###############################################################################################################################
+# Binary tainted flow analysis
+###############################################################################################################################
+
+noinst_PROGRAMS += taintedFlow
+taintedFlow_SOURCES = taintedFlow.C
+taintedFlow_LDADD = $(ROSE_LIBS_WITH_PATH) $(ROSE_SEPARATE_LIBS) $(RT_LIBS)
+
+taintedFlow_Specimens = i386-taintflow1
+taintedFlow_TestTargets = $(addprefix taint_, $(addsuffix .passed, $(taintedFlow_Specimens)))
+taintedFlow_TestAnswers = $(addprefix taint_, $(addsuffix .ans, $(taintedFlow_Specimens)))
+
+TEST_TARGETS += $(taintedFlow_TestTargets)
+EXTRA_DIST += $(taintedFlow_TestAnswers) taintedFlow.conf
+
+$(taintedFlow_TestTargets): taint_%.passed: $(BINARY_SAMPLES)/% taintedFlow taintedFlow.conf
+	@$(RTH_RUN) \
+		TITLE="Tainted flow for $* [$@]" \
+		USE_SUBDIR=yes \
+		CMD="$(abspath ./taintedFlow) --approx=under --blocks --names='^f[0-9]' -- $(abspath $<)" \
+		ANS="$(abs_srcdir)/taint_$*.ans" \
+		$(abs_srcdir)/taintedFlow.conf $@
+
+.PHONY: check-taint
+check-taint: $(taintedFlow_TestTargets)
+
 
 ###############################################################################################################################
 # DEMOS
@@ -864,11 +950,7 @@ demo_disassemble: disassemble demo_yicesSemanticsLib
 	./disassemble -rose:disassembler_search following,immediate,words,allbytes,unused,nonexe,deadend,unknown $(BINARY_SAMPLES)/i686-test1.O0.bin
 	@echo "output has been dumped to i686-test1.O0.bin.dump"
 
-demo_disassembleBuffer: disassembleBuffer demo_disassemble
-	@echo; echo; echo "Demo for $<"; echo
-	./disassembleBuffer $(BINARY_SAMPLES)/buffer2.raw 0x8048310
-
-demo_testAssembler: testAssembler demo_disassembleBuffer
+demo_testAssembler: testAssembler demo_yicesSemanticsLib
 	@echo; echo; echo "Demo for $<"; echo
 	./testAssembler $(BINARY_SAMPLES)/buffer2.bin
 
@@ -907,7 +989,7 @@ parse_Targets = $(addprefix parse_, $(addsuffix .passed, $(parse_Specimens)))
 TEST_TARGETS += $(parse_Targets)
 
 $(parse_Targets): parse_%.passed: $(BINARY_SAMPLES)/% disassemble
-	@$(RTH_RUN) CMD="`pwd`/disassemble -rose:binary --skip-disassemble" SPECIMEN="$(abspath $<)" $(TEST_SPECIMEN) $@
+	@$(RTH_RUN) CMD="`pwd`/disassemble" SPECIMEN="$(abspath $<)" $(TEST_SPECIMEN) $@
 
 .PHONY: check_parse_container
 check_parse_container: $(parse_Targets)
@@ -919,7 +1001,7 @@ disassemble_Targets = $(addprefix disassemble_, $(addsuffix .passed, $(disassemb
 TEST_TARGETS += $(disassemble_Targets)
 
 $(disassemble_Targets): disassemble_%.passed: $(BINARY_SAMPLES)/% disassemble
-	@$(RTH_RUN) CMD="`pwd`/disassemble -rose:binary --quiet" SPECIMEN="$(abspath $<)" $(TEST_SPECIMEN) $@
+	@$(RTH_RUN) CMD="`pwd`/disassemble --quiet" SPECIMEN="$(abspath $<)" $(TEST_SPECIMEN) $@
 
 .PHONY: check_disassemble
 check_disassemble: $(disassemble_Targets)
@@ -931,7 +1013,7 @@ unparse_Targets = $(addprefix unparse_, $(addsuffix .passed, $(unparse_Specimens
 TEST_TARGETS += $(unparse_Targets)
 
 $(unparse_Targets): unparse_%.passed: $(BINARY_SAMPLES)/% disassemble
-	@$(RTH_RUN) CMD="`pwd`/disassemble -rose:binary" SPECIMEN="$(abspath $<)" $(TEST_SPECIMEN) $@
+	@$(RTH_RUN) CMD="`pwd`/disassemble" SPECIMEN="$(abspath $<)" $(TEST_SPECIMEN) $@
 
 .PHONY: check_unparse
 check_unparse: $(unparse_Targets)
@@ -943,7 +1025,7 @@ assemble_Targets = $(addprefix assemble_, $(addsuffix .passed, $(assemble_Specim
 TEST_TARGETS += $(assemble_Targets)
 
 $(assemble_Targets): assemble_%.passed: $(BINARY_SAMPLES)/% disassemble
-	@$(RTH_RUN) CMD="`pwd`/disassemble -rose:binary --quiet --reassemble --show-bad" SPECIMEN="$(abspath $<)" $(TEST_SPECIMEN) $@
+	@$(RTH_RUN) CMD="`pwd`/disassemble --quiet --reassemble --show-bad" SPECIMEN="$(abspath $<)" $(TEST_SPECIMEN) $@
 
 .PHONY: check_assemble
 check_assemble: $(assemble_Targets)

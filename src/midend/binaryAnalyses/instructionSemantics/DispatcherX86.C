@@ -3,6 +3,7 @@
 #include "DispatcherX86.h"
 #include "integerOps.h"
 
+namespace rose {
 namespace BinaryAnalysis {
 namespace InstructionSemantics2 {
 
@@ -11,13 +12,8 @@ namespace InstructionSemantics2 {
  *******************************************************************************************************************************/
 
 static inline size_t asm_type_width(SgAsmType* ty) {
-  switch (ty->variantT()) {
-    case V_SgAsmTypeByte: return 8;
-    case V_SgAsmTypeWord: return 16;
-    case V_SgAsmTypeDoubleWord: return 32;
-    case V_SgAsmTypeQuadWord: return 64;
-    default: {std::cerr << "Unhandled type " << ty->class_name() << " in asm_type_width" << std::endl; abort();}
-  }
+    ASSERT_not_null(ty);
+    return ty->get_nBits();
 }
 
 /*******************************************************************************************************************************
@@ -32,19 +28,19 @@ class P: public BaseSemantics::InsnProcessor {
 public:
     typedef DispatcherX86 *D;
     typedef BaseSemantics::RiscOperators *Ops;
-    typedef SgAsmx86Instruction *I;
+    typedef SgAsmX86Instruction *I;
     typedef const SgAsmExpressionPtrList &A;
     virtual void p(D, Ops, I, A) = 0;
 
-    virtual void process(const BaseSemantics::DispatcherPtr &dispatcher_, SgAsmInstruction *insn_) /*override*/ {
+    virtual void process(const BaseSemantics::DispatcherPtr &dispatcher_, SgAsmInstruction *insn_) ROSE_OVERRIDE {
         DispatcherX86Ptr dispatcher = DispatcherX86::promote(dispatcher_);
         BaseSemantics::RiscOperatorsPtr operators = dispatcher->get_operators();
-        SgAsmx86Instruction *insn = isSgAsmx86Instruction(insn_);
-        assert(insn!=NULL && insn==operators->get_insn());
+        SgAsmX86Instruction *insn = isSgAsmX86Instruction(insn_);
+        ASSERT_require(insn!=NULL && insn==operators->get_insn());
         operators->writeRegister(dispatcher->REG_EIP, operators->add(operators->number_(32, insn->get_address()),
                                                                      operators->number_(32, insn->get_size())));
         SgAsmExpressionPtrList &operands = insn->get_operandList()->get_operands();
-        check_arg_width(insn, operands);
+        check_arg_width(dispatcher.get(), insn, operands);
         p(dispatcher.get(), operators.get(), insn, operands);
     }
 
@@ -57,11 +53,31 @@ public:
 
     // This is here because we don't fully support 64-bit mode yet, and a few of the support functions will fail in bad ways.
     // E.g., "jmp ds:[rip+0x200592]" will try to read32() the argument and then fail an assertion because it isn't 32 bits wide.
-    void check_arg_width(I insn, A args) {
+    // Note that even 32-bit x86 architectures might have registers that are larger than 32 bits (e.g., xmm registers on a
+    // Pentium4). Therefore, we consult the register dictionary and only fail if the operand is larger than 32 bits and
+    // contains a register which isn't part of the dictionary.
+    void check_arg_width(D d, I insn, A args) {
+        struct T1: AstSimpleProcessing {
+            D d;
+            I insn;
+            size_t argWidth;
+            T1(D d, I insn, size_t argWidth): d(d), insn(insn), argWidth(argWidth) {}
+            void visit(SgNode *node) {
+                if (SgAsmRegisterReferenceExpression *rre = isSgAsmRegisterReferenceExpression(node)) {
+                    const RegisterDictionary *regdict = d->get_register_dictionary();
+                    ASSERT_not_null(regdict);
+                    if (regdict->lookup(rre->get_descriptor()).empty())
+                        throw BaseSemantics::Exception(StringUtility::numberToString(argWidth) +
+                                                       "-bit operands not supported for " +
+                                                       regdict->get_architecture_name(),
+                                                       insn);
+                }
+            }
+        };
         for (size_t i=0; i<args.size(); ++i) {
             size_t nbits = asm_type_width(args[i]->get_type());
             if (nbits > 32)
-                throw BaseSemantics::Exception(StringUtility::numberToString(nbits)+"-bit operands not supported yet", insn);
+                T1(d, insn, nbits).traverse(args[i], preorder);
         }
     }
 };
@@ -70,14 +86,14 @@ public:
 struct IP_aaa: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 0);
-        BaseSemantics::SValuePtr nybble = ops->extract(ops->readRegister(d->REG_AL), 0, 4);
-        BaseSemantics::SValuePtr incAh = ops->or_(ops->readRegister(d->REG_AF), d->greaterOrEqualToTen(nybble));
+        BaseSemantics::SValuePtr nybble = ops->extract(d->readRegister(d->REG_AL), 0, 4);
+        BaseSemantics::SValuePtr incAh = ops->or_(d->readRegister(d->REG_AF), d->greaterOrEqualToTen(nybble));
         ops->writeRegister(d->REG_AX, 
                            ops->concat(ops->add(ops->ite(incAh, ops->number_(4, 6), ops->number_(4, 0)),
-                                                ops->extract(ops->readRegister(d->REG_AL), 0, 4)),
+                                                ops->extract(d->readRegister(d->REG_AL), 0, 4)),
                                        ops->concat(ops->number_(4, 0),
                                                    ops->add(ops->ite(incAh, ops->number_(8, 1), ops->number_(8, 0)),
-                                                            ops->readRegister(d->REG_AH)))));
+                                                            d->readRegister(d->REG_AH)))));
         ops->writeRegister(d->REG_OF, ops->undefined_(1));
         ops->writeRegister(d->REG_SF, ops->undefined_(1));
         ops->writeRegister(d->REG_ZF, ops->undefined_(1));
@@ -91,8 +107,8 @@ struct IP_aaa: P {
 struct IP_aad: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 1);
-        BaseSemantics::SValuePtr al = ops->readRegister(d->REG_AL);
-        BaseSemantics::SValuePtr ah = ops->readRegister(d->REG_AH);
+        BaseSemantics::SValuePtr al = d->readRegister(d->REG_AL);
+        BaseSemantics::SValuePtr ah = d->readRegister(d->REG_AH);
         BaseSemantics::SValuePtr divisor = d->read(args[0], 8);
         BaseSemantics::SValuePtr newAl = ops->add(al, ops->extract(ops->unsignedMultiply(ah, divisor), 0, 8));
         ops->writeRegister(d->REG_AX, ops->concat(newAl, ops->number_(8, 0)));
@@ -107,7 +123,7 @@ struct IP_aad: P {
 struct IP_aam: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 1);
-        BaseSemantics::SValuePtr al = ops->readRegister(d->REG_AL);
+        BaseSemantics::SValuePtr al = d->readRegister(d->REG_AL);
         BaseSemantics::SValuePtr divisor = d->read(args[0], 8);
         BaseSemantics::SValuePtr newAh = ops->unsignedDivide(al, divisor);
         BaseSemantics::SValuePtr newAl = ops->unsignedModulo(al, divisor);
@@ -123,14 +139,14 @@ struct IP_aam: P {
 struct IP_aas: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 0);
-        BaseSemantics::SValuePtr nybble = ops->extract(ops->readRegister(d->REG_AL), 0, 4);
-        BaseSemantics::SValuePtr decAh = ops->or_(ops->readRegister(d->REG_AF), d->greaterOrEqualToTen(nybble));
+        BaseSemantics::SValuePtr nybble = ops->extract(d->readRegister(d->REG_AL), 0, 4);
+        BaseSemantics::SValuePtr decAh = ops->or_(d->readRegister(d->REG_AF), d->greaterOrEqualToTen(nybble));
         ops->writeRegister(d->REG_AX, 
                            ops->concat(ops->add(ops->ite(decAh, ops->number_(4, -6), ops->number_(4, 0)),
-                                                ops->extract(ops->readRegister(d->REG_AL), 0, 4)),
+                                                ops->extract(d->readRegister(d->REG_AL), 0, 4)),
                                        ops->concat(ops->number_(4, 0),
                                                    ops->add(ops->ite(decAh, ops->number_(8, -1), ops->number_(8, 0)),
-                                                            ops->readRegister(d->REG_AH)))));
+                                                            d->readRegister(d->REG_AH)))));
         ops->writeRegister(d->REG_OF, ops->undefined_(1));
         ops->writeRegister(d->REG_SF, ops->undefined_(1));
         ops->writeRegister(d->REG_ZF, ops->undefined_(1));
@@ -146,7 +162,7 @@ struct IP_adc: P {
         assert_args(insn, args, 2);
         size_t nbits = asm_type_width(args[0]->get_type());
         BaseSemantics::SValuePtr result = d->doAddOperation(d->read(args[0], nbits), d->read(args[1], nbits),
-                                                            false, ops->readRegister(d->REG_CF));
+                                                            false, d->readRegister(d->REG_CF));
         d->write(args[0], result);
     }
 };
@@ -180,7 +196,7 @@ struct IP_and: P {
 struct IP_bitscan: P {
     const X86InstructionKind kind;
     IP_bitscan(X86InstructionKind k): kind(k) {
-        assert(x86_bsf==k || x86_bsr==k);
+        ASSERT_require(x86_bsf==k || x86_bsr==k);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 2);
@@ -194,11 +210,11 @@ struct IP_bitscan: P {
         BaseSemantics::SValuePtr isZero = ops->equalToZero(op);
         ops->writeRegister(d->REG_ZF, isZero);
         BaseSemantics::SValuePtr bitno;
-        assert(insn->get_kind()==kind);
+        ASSERT_require(insn->get_kind()==kind);
         switch (kind) {
             case x86_bsf: bitno = ops->leastSignificantSetBit(op); break;
             case x86_bsr: bitno = ops->mostSignificantSetBit(op); break;
-            default: assert(!"instruction kind not handled"); abort();
+            default: ASSERT_not_reachable("instruction kind not handled");
         }
         BaseSemantics::SValuePtr result = ops->ite(isZero, d->read(args[0], nbits), bitno);
         d->write(args[0], result);
@@ -209,11 +225,11 @@ struct IP_bitscan: P {
 struct IP_bittest: P {
     const X86InstructionKind kind;
     IP_bittest(X86InstructionKind k): kind(k) {
-        assert(x86_bt==k || x86_btr==k || x86_bts==k);
+        ASSERT_require(x86_bt==k || x86_btr==k || x86_bts==k);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 2);
-        assert(insn->get_kind()==kind);
+        ASSERT_require(insn->get_kind()==kind);
         // All flags except CF are undefined
         ops->writeRegister(d->REG_OF, ops->undefined_(1));
         ops->writeRegister(d->REG_SF, ops->undefined_(1));
@@ -221,14 +237,15 @@ struct IP_bittest: P {
         ops->writeRegister(d->REG_AF, ops->undefined_(1));
         ops->writeRegister(d->REG_PF, ops->undefined_(1));
                 
-        if (isSgAsmMemoryReferenceExpression(args[0]) && isSgAsmx86RegisterReferenceExpression(args[1])) {
+        if (isSgAsmMemoryReferenceExpression(args[0]) && isSgAsmRegisterReferenceExpression(args[1])) {
             // Special case allowing multi-word offsets into memory
             SgAsmMemoryReferenceExpression *mre = isSgAsmMemoryReferenceExpression(args[0]);
             BaseSemantics::SValuePtr addr = d->effectiveAddress(mre, 32);
             size_t nbits = asm_type_width(args[1]->get_type());
             BaseSemantics::SValuePtr bitnum = d->read(args[1], nbits);
             BaseSemantics::SValuePtr adjustedAddr = ops->add(addr, ops->signExtend(ops->extract(bitnum, 3, nbits), 32));
-            BaseSemantics::SValuePtr val = ops->readMemory(d->segmentRegister(mre), adjustedAddr, ops->boolean_(true), 8);
+            BaseSemantics::SValuePtr dflt = ops->undefined_(8);
+            BaseSemantics::SValuePtr val = ops->readMemory(d->segmentRegister(mre), adjustedAddr, dflt, ops->boolean_(true));
             BaseSemantics::SValuePtr bitval = ops->extract(ops->shiftRight(val, ops->extract(bitnum, 0, 3)), 0, 1);
             ops->writeRegister(d->REG_CF, bitval);
             BaseSemantics::SValuePtr result;
@@ -244,8 +261,7 @@ struct IP_bittest: P {
                     ops->writeMemory(d->segmentRegister(mre), adjustedAddr, result, ops->boolean_(true));
                     break;
                 default:
-                    assert(!"instruction kind not handled");
-                    abort();
+                    ASSERT_not_reachable("instruction kind not handled");
             }
         } else {
             // Simple case
@@ -267,8 +283,7 @@ struct IP_bittest: P {
                     d->write(args[0], result);
                     break;
                 default:
-                    assert(!"instruction kind not handled");
-                    abort();
+                    ASSERT_not_reachable("instruction kind not handled");
             }
         }
     }
@@ -293,9 +308,9 @@ struct IP_call: P {
         assert_args(insn, args, 1);
         if (insn->get_addressSize() != x86_insnsize_32 || insn->get_operandSize() != x86_insnsize_32)
             throw BaseSemantics::Exception("size not implemented", insn);
-        BaseSemantics::SValuePtr oldSp = ops->readRegister(d->REG_ESP);
+        BaseSemantics::SValuePtr oldSp = d->readRegister(d->REG_ESP);
         BaseSemantics::SValuePtr newSp = ops->add(oldSp, ops->number_(32, -4));
-        ops->writeMemory(d->REG_SS, newSp, ops->readRegister(d->REG_EIP), ops->boolean_(true));
+        ops->writeMemory(d->REG_SS, newSp, d->readRegister(d->REG_EIP), ops->boolean_(true));
         ops->writeRegister(d->REG_EIP, ops->filterCallTarget(d->read(args[0], 32)));
         ops->writeRegister(d->REG_ESP, newSp);
     }
@@ -305,7 +320,7 @@ struct IP_call: P {
 struct IP_cdq: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 0);
-        ops->writeRegister(d->REG_EDX, ops->extract(ops->signExtend(ops->readRegister(d->REG_EAX), 64), 32, 64));
+        ops->writeRegister(d->REG_EDX, ops->extract(ops->signExtend(d->readRegister(d->REG_EAX), 64), 32, 64));
     }
 };
 
@@ -313,7 +328,7 @@ struct IP_cdq: P {
 struct IP_cbw: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 0);
-        ops->writeRegister(d->REG_AX, ops->signExtend(ops->readRegister(d->REG_AL), 16));
+        ops->writeRegister(d->REG_AX, ops->signExtend(d->readRegister(d->REG_AL), 16));
     }
 };
 
@@ -337,7 +352,7 @@ struct IP_cld: P {
 struct IP_cmc: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 0);
-        ops->writeRegister(d->REG_CF, ops->invert(ops->readRegister(d->REG_CF)));
+        ops->writeRegister(d->REG_CF, ops->invert(d->readRegister(d->REG_CF)));
     }
 };
 
@@ -345,15 +360,15 @@ struct IP_cmc: P {
 struct IP_cmovcc: P {
     const X86InstructionKind kind;
     IP_cmovcc(X86InstructionKind k): kind(k) {
-        assert(x86_cmovne==k || x86_cmove==k || x86_cmovno==k || x86_cmovo==k || x86_cmovpo==k || x86_cmovpe==k ||
-               x86_cmovns==k || x86_cmovs==k || x86_cmovae==k || x86_cmovb==k || x86_cmovbe==k || x86_cmova==k ||
-               x86_cmovle==k || x86_cmovg==k || x86_cmovge==k || x86_cmovl==k);
+        ASSERT_require(x86_cmovne==k || x86_cmove==k || x86_cmovno==k || x86_cmovo==k || x86_cmovpo==k || x86_cmovpe==k ||
+                       x86_cmovns==k || x86_cmovs==k || x86_cmovae==k || x86_cmovb==k || x86_cmovbe==k || x86_cmova==k ||
+                       x86_cmovle==k || x86_cmovg==k || x86_cmovge==k || x86_cmovl==k);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 2);
-        assert(insn->get_kind()==kind);
+        ASSERT_require(insn->get_kind()==kind);
         size_t nbits = asm_type_width(args[0]->get_type());
-        assert(16==nbits || 32==nbits);
+        ASSERT_require(16==nbits || 32==nbits);
         BaseSemantics::SValuePtr cond = d->flagsCombo(kind);
         d->write(args[0], ops->ite(cond, d->read(args[1], nbits), d->read(args[0], nbits)));
     }                                                                                                                          \
@@ -374,7 +389,7 @@ struct IP_cmpstrings: P {
     const size_t nbits;
     const size_t nbytes;
     IP_cmpstrings(X86RepeatPrefix repeat, size_t nbits): repeat(repeat), nbits(nbits), nbytes(nbits/8) {
-        assert(8==nbits || 16==nbits || 32==nbits);
+        ASSERT_require(8==nbits || 16==nbits || 32==nbits);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 0);
@@ -384,19 +399,21 @@ struct IP_cmpstrings: P {
         RegisterDescriptor sr(x86_regclass_segment,
                               insn->get_segmentOverride()!=x86_segreg_none ? insn->get_segmentOverride() : x86_segreg_ds,
                               0, 16);
-        BaseSemantics::SValuePtr si_value = ops->readMemory(sr, ops->readRegister(d->REG_ESI), in_loop, nbits);
-        BaseSemantics::SValuePtr di_value = ops->readMemory(d->REG_ES, ops->readRegister(d->REG_EDI), in_loop, nbits);
+        BaseSemantics::SValuePtr si_value = ops->readMemory(sr, d->readRegister(d->REG_ESI),
+                                                            ops->undefined_(nbits), in_loop);
+        BaseSemantics::SValuePtr di_value = ops->readMemory(d->REG_ES, d->readRegister(d->REG_EDI),
+                                                            ops->undefined_(nbits), in_loop);
         d->doAddOperation(si_value, ops->invert(di_value), true, ops->boolean_(false), in_loop);
-        BaseSemantics::SValuePtr step = ops->ite(ops->readRegister(d->REG_DF),
+        BaseSemantics::SValuePtr step = ops->ite(d->readRegister(d->REG_DF),
                                                  ops->number_(32, -nbytes), ops->number_(32, nbytes));
         ops->writeRegister(d->REG_ESI,
                            ops->ite(in_loop,
-                                    ops->add(ops->readRegister(d->REG_ESI), step),
-                                    ops->readRegister(d->REG_ESI)));
+                                    ops->add(d->readRegister(d->REG_ESI), step),
+                                    d->readRegister(d->REG_ESI)));
         ops->writeRegister(d->REG_EDI,
                            ops->ite(in_loop,
-                                    ops->add(ops->readRegister(d->REG_EDI), step),
-                                    ops->readRegister(d->REG_EDI)));
+                                    ops->add(d->readRegister(d->REG_EDI), step),
+                                    d->readRegister(d->REG_EDI)));
         if (x86_repeat_none!=repeat)
             d->repLeave(repeat, in_loop, insn->get_address());
     }
@@ -410,9 +427,9 @@ struct IP_cmpxchg: P {
         BaseSemantics::SValuePtr op0 = d->read(args[0], nbits);
         RegisterDescriptor A = d->REG_EAX;
         A.set_nbits(nbits);
-        BaseSemantics::SValuePtr oldA = ops->readRegister(A);
+        BaseSemantics::SValuePtr oldA = d->readRegister(A);
         (void) d->doAddOperation(oldA, ops->invert(op0), true, ops->boolean_(false));
-        BaseSemantics::SValuePtr zf = ops->readRegister(d->REG_ZF);
+        BaseSemantics::SValuePtr zf = d->readRegister(d->REG_ZF);
         d->write(args[0], ops->ite(zf, d->read(args[1], nbits), op0));
         ops->writeRegister(A, ops->ite(zf, oldA, op0));
     }
@@ -430,7 +447,7 @@ struct IP_cpuid: P {
 struct IP_cwd: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 0);
-        ops->writeRegister(d->REG_DX, ops->extract(ops->signExtend(ops->readRegister(d->REG_AX), 32), 16, 32));
+        ops->writeRegister(d->REG_DX, ops->extract(ops->signExtend(d->readRegister(d->REG_AX), 32), 16, 32));
     }
 };
 
@@ -438,7 +455,7 @@ struct IP_cwd: P {
 struct IP_cwde: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 0);
-        ops->writeRegister(d->REG_EAX, ops->signExtend(ops->readRegister(d->REG_AX), 32)); 
+        ops->writeRegister(d->REG_EAX, ops->signExtend(d->readRegister(d->REG_AX), 32)); 
     }
 };
 
@@ -465,7 +482,7 @@ struct IP_hlt: P {
 struct IP_divide: P {
     const X86InstructionKind kind;
     IP_divide(X86InstructionKind k): kind(k) {
-        assert(x86_div==k || x86_idiv==k);
+        ASSERT_require(x86_div==k || x86_idiv==k);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 1);
@@ -474,13 +491,13 @@ struct IP_divide: P {
         RegisterDescriptor regD = d->REG_DX; regD.set_nbits(8==nbits ? 16 : nbits);
         BaseSemantics::SValuePtr op0;
         if (8==nbits) {
-            op0 = ops->readRegister(regA);
+            op0 = d->readRegister(regA);
         } else {
-            op0 = ops->concat(ops->readRegister(regA), ops->readRegister(regD));
+            op0 = ops->concat(d->readRegister(regA), d->readRegister(regD));
         }
         BaseSemantics::SValuePtr op1 = d->read(args[0], nbits);
         BaseSemantics::SValuePtr divResult, modResult;
-        assert(insn->get_kind()==kind);
+        ASSERT_require(insn->get_kind()==kind);
         switch (kind) {
             case x86_idiv:
                 divResult = ops->signedDivide(op0, op1);
@@ -491,8 +508,7 @@ struct IP_divide: P {
                 modResult = ops->unsignedModulo(op0, op1);
                 break;
             default:
-                assert(!"instruction kind not handled");
-                abort();
+                ASSERT_not_reachable("instruction kind not handled");
         }
         if (8==nbits) {
             ops->writeRegister(regA, ops->concat(ops->extract(divResult, 0, 8), modResult));
@@ -509,21 +525,62 @@ struct IP_divide: P {
     }
 };
 
+// Load floating-point value
+struct IP_fld: P {
+    void p(D d, Ops ops, I insn, A args) {
+        assert_args(insn, args, 1);
+        size_t nbits = asm_type_width(args[0]->get_type());
+        if (80!=nbits)
+            throw BaseSemantics::Exception(StringUtility::numberToString(nbits)+"-bit FP values not supported yet", insn);
+        BaseSemantics::SValuePtr fp = d->read(args[0], nbits);
+        d->pushFloatingPoint(fp);
+    }
+};
+
 // Restore x86 FPU control word
 struct IP_fldcw: P {
     void p(D d, Ops ops, I insn, A args) {
-        // FIXME: this is a dummy version that should be replaced later
         assert_args(insn, args, 1);
-        (void) d->read(args[0], 16); // To catch access control violations
+        ops->writeRegister(d->REG_FPCTL, d->read(args[0], 16));
     }
 };
 
 // Store x87 FPU control word
 struct IP_fnstcw: P {
     void p(D d, Ops ops, I insn, A args) {
-        // FIXME: this is a dummy version that should be replaced later
         assert_args(insn, args, 1);
-        d->write(args[0], ops->number_(16, 0x37f));
+        d->write(args[0], d->readRegister(d->REG_FPCTL));
+    }
+};
+
+// Store x87 FPU status word
+struct IP_fnstsw: P {
+    void p(D d, Ops ops, I insn, A args) {
+        assert_args(insn, args, 1);
+        d->write(args[0], d->readRegister(d->REG_FPSTATUS));
+    }
+};
+
+// Store x87 floating point value
+struct IP_fst: P {
+    void p(D d, Ops ops, I insn, A args) {
+        assert_args(insn, args, 1);
+        size_t nbits = asm_type_width(args[0]->get_type());
+        if (80!=nbits)
+            throw BaseSemantics::Exception(StringUtility::numberToString(nbits)+"-bit FP values not supported yet", insn);
+        d->write(args[0], d->readFloatingPointStack(0));
+    }
+};
+
+// Store x87 floating point value and pop fp stack
+struct IP_fstp: P {
+    void p(D d, Ops ops, I insn, A args) {
+        assert_args(insn, args, 1);
+        size_t nbits = asm_type_width(args[0]->get_type());
+        if (80!=nbits)
+            throw BaseSemantics::Exception(StringUtility::numberToString(nbits)+"-bit FP values not supported yet", insn);
+        d->write(args[0], d->readFloatingPointStack(0));
+        d->popFloatingPoint();
     }
 };
 
@@ -537,14 +594,14 @@ struct IP_imul: P {
         reg0.set_nbits(nbits);
         if (8==nbits) {
             assert_args(insn, args, 1);
-            BaseSemantics::SValuePtr op0 = ops->readRegister(reg0);
+            BaseSemantics::SValuePtr op0 = d->readRegister(reg0);
             BaseSemantics::SValuePtr op1 = d->read(args[0], nbits);
             result = ops->signedMultiply(op0, op1);
             ops->writeRegister(d->REG_AX, result);
         } else {
             if (args.size()<1 || args.size()>3)
                 throw BaseSemantics::Exception("instruction must have 1, 2, or 3 arguments", insn);
-            BaseSemantics::SValuePtr op0 = 1==args.size() ? ops->readRegister(reg0) : d->read(args[args.size()-2], nbits);
+            BaseSemantics::SValuePtr op0 = 1==args.size() ? d->readRegister(reg0) : d->read(args[args.size()-2], nbits);
             BaseSemantics::SValuePtr op1 = ops->signExtend(d->read(args.back(), nbits_last), nbits);
             result = ops->signedMultiply(op0, op1);
             if (1==args.size()) {
@@ -556,7 +613,7 @@ struct IP_imul: P {
                 d->write(args[0], ops->extract(result, 0, nbits));
             }
         }
-        assert(result->get_width() == 2*nbits);
+        ASSERT_require(result->get_width() == 2*nbits);
 
         // For the one-operand form of the instruction, the CF and OF flags are set only when bits are carried into the upper
         // half of the result; for the two- and three-operand forms, the CF and OF flags are set only when the signed result
@@ -599,7 +656,7 @@ struct IP_inc: P {
 struct IP_int: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 1);
-        SgAsmByteValueExpression *bv = isSgAsmByteValueExpression(args[0]);
+        SgAsmIntegerValueExpression *bv = isSgAsmIntegerValueExpression(args[0]);
         if (!bv)
             throw BaseSemantics::Exception("operand must be a byte value expression", insn);
         ops->interrupt(0, bv->get_value());
@@ -618,16 +675,16 @@ struct IP_jmp: P {
 struct IP_jcc: P {
     const X86InstructionKind kind;
     IP_jcc(X86InstructionKind k): kind(k) {
-        assert(x86_jne==k || x86_je==k || x86_jno==k || x86_jo==k || x86_jns==k || x86_js==k ||
-               x86_jpo==k || x86_jpe==k || x86_jae==k || x86_jb==k || x86_jbe==k || x86_ja==k ||
-               x86_jl==k || x86_jge==k || x86_jle==k || x86_jg==k || x86_jcxz==k || x86_jecxz==k);
+        ASSERT_require(x86_jne==k || x86_je==k || x86_jno==k || x86_jo==k || x86_jns==k || x86_js==k ||
+                       x86_jpo==k || x86_jpe==k || x86_jae==k || x86_jb==k || x86_jbe==k || x86_ja==k ||
+                       x86_jl==k || x86_jge==k || x86_jle==k || x86_jg==k || x86_jcxz==k || x86_jecxz==k);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 1);
-        assert(insn->get_kind()==kind);
+        ASSERT_require(insn->get_kind()==kind);
         BaseSemantics::SValuePtr cond = d->flagsCombo(kind);
         ops->writeRegister(d->REG_EIP,
-                           ops->ite(cond, d->read(args[0], 32), ops->readRegister(d->REG_EIP)));
+                           ops->ite(cond, d->read(args[0], 32), d->readRegister(d->REG_EIP)));
     }
 };
 
@@ -645,10 +702,10 @@ struct IP_leave: P {
         assert_args(insn, args, 0);
         if (insn->get_addressSize() != x86_insnsize_32 || insn->get_operandSize() != x86_insnsize_32)
             throw BaseSemantics::Exception("size not implemented", insn);
-        ops->writeRegister(d->REG_ESP, ops->readRegister(d->REG_EBP));
-        BaseSemantics::SValuePtr oldSp = ops->readRegister(d->REG_ESP);
+        ops->writeRegister(d->REG_ESP, d->readRegister(d->REG_EBP));
+        BaseSemantics::SValuePtr oldSp = d->readRegister(d->REG_ESP);
         BaseSemantics::SValuePtr newSp = ops->add(oldSp, ops->number_(32, 4));
-        ops->writeRegister(d->REG_EBP, ops->readMemory(d->REG_SS, oldSp, ops->boolean_(true), 32));
+        ops->writeRegister(d->REG_EBP, ops->readMemory(d->REG_SS, oldSp, ops->undefined_(32), ops->boolean_(true)));
         ops->writeRegister(d->REG_ESP, newSp);
     }
 };
@@ -669,7 +726,7 @@ struct IP_loadstring: P {
     const size_t nbits;
     const size_t nbytes;
     IP_loadstring(X86RepeatPrefix repeat, size_t nbits): repeat(repeat), nbits(nbits), nbytes(nbits/8) {
-        assert(8==nbits || 16==nbits || 32==nbits);
+        ASSERT_require(8==nbits || 16==nbits || 32==nbits);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 0);
@@ -680,11 +737,11 @@ struct IP_loadstring: P {
         RegisterDescriptor sr(x86_regclass_segment,
                               insn->get_segmentOverride()!=x86_segreg_none ? insn->get_segmentOverride() : x86_segreg_ds,
                               0, 16);
-        BaseSemantics::SValuePtr value = ops->readMemory(sr, ops->readRegister(d->REG_ESI), in_loop, nbits);
+        BaseSemantics::SValuePtr value = ops->readMemory(sr, d->readRegister(d->REG_ESI), ops->undefined_(nbits), in_loop);
         ops->writeRegister(regA, value);
-        BaseSemantics::SValuePtr step = ops->ite(ops->readRegister(d->REG_DF),
+        BaseSemantics::SValuePtr step = ops->ite(d->readRegister(d->REG_DF),
                                                  ops->number_(32, -nbytes), ops->number_(32, nbytes));
-        ops->writeRegister(d->REG_ESI, ops->add(ops->readRegister(d->REG_ESI), step));
+        ops->writeRegister(d->REG_ESI, ops->add(d->readRegister(d->REG_ESI), step));
     }
 };
 
@@ -692,37 +749,55 @@ struct IP_loadstring: P {
 struct IP_loop: P {
     const X86InstructionKind kind;
     IP_loop(X86InstructionKind k): kind(k) {
-        assert(x86_loop==k || x86_loopnz==k || x86_loopz==k);
+        ASSERT_require(x86_loop==k || x86_loopnz==k || x86_loopz==k);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 1);
         if (insn->get_addressSize() != x86_insnsize_32 || insn->get_operandSize() != x86_insnsize_32)
             throw BaseSemantics::Exception("size not implemented", insn);
-        BaseSemantics::SValuePtr oldCx = ops->readRegister(d->REG_ECX);
+        BaseSemantics::SValuePtr oldCx = d->readRegister(d->REG_ECX);
         BaseSemantics::SValuePtr newCx = ops->add(ops->number_(32, -1), oldCx);
         ops->writeRegister(d->REG_ECX, newCx);
         BaseSemantics::SValuePtr doLoop;
-        assert(insn->get_kind()==kind);
+        ASSERT_require(insn->get_kind()==kind);
         switch (kind) {
             case x86_loop:
                 doLoop = ops->invert(ops->equalToZero(newCx));
                 break;
             case x86_loopnz:
-                doLoop = ops->and_(ops->invert(ops->equalToZero(newCx)), ops->invert(ops->readRegister(d->REG_ZF)));
+                doLoop = ops->and_(ops->invert(ops->equalToZero(newCx)), ops->invert(d->readRegister(d->REG_ZF)));
                 break;
             case x86_loopz:
-                doLoop = ops->and_(ops->invert(ops->equalToZero(newCx)), ops->readRegister(d->REG_ZF));
+                doLoop = ops->and_(ops->invert(ops->equalToZero(newCx)), d->readRegister(d->REG_ZF));
                 break;
             default:
-                assert(!"instruction type not handled");
-                abort();
+                ASSERT_not_reachable("instruction type not handled");
         }
-        ops->writeRegister(d->REG_EIP, ops->ite(doLoop, d->read(args[0], 32), ops->readRegister(d->REG_EIP)));
+        ops->writeRegister(d->REG_EIP, ops->ite(doLoop, d->read(args[0], 32), d->readRegister(d->REG_EIP)));
     }
 };
 
 // Move
 struct IP_mov: P {
+    void p(D d, Ops ops, I insn, A args) {
+        assert_args(insn, args, 2);
+        size_t nbits = asm_type_width(args[0]->get_type());
+        d->write(args[0], d->read(args[1], nbits));
+    }
+};
+
+// Move source to destination with truncation or zero extend
+struct IP_move_extend: P {
+    void p(D d, Ops ops, I insn, A args) {
+        assert_args(insn, args, 2);
+        size_t nbitsSrc = asm_type_width(args[1]->get_type());
+        size_t nbitsDst = asm_type_width(args[0]->get_type());
+        d->write(args[0], ops->unsignedExtend(d->read(args[1], nbitsSrc), nbitsDst));
+    }
+};
+
+// Move aligned double quadword
+struct IP_movdqa: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 2);
         size_t nbits = asm_type_width(args[0]->get_type());
@@ -736,23 +811,24 @@ struct IP_movestring: P {
     const size_t nbits;
     const size_t nbytes;
     IP_movestring(X86RepeatPrefix repeat, size_t nbits): repeat(repeat), nbits(nbits), nbytes(nbits/8) {
-        assert(8==nbits || 16==nbits || 32==nbits);
-        assert(x86_repeat_none==repeat || x86_repeat_repe==repeat);
+        ASSERT_require(8==nbits || 16==nbits || 32==nbits);
+        ASSERT_require(x86_repeat_none==repeat || x86_repeat_repe==repeat);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 0);
         if (insn->get_addressSize() != x86_insnsize_32)
             throw BaseSemantics::Exception("size not implemented", insn);
         BaseSemantics::SValuePtr in_loop = d->repEnter(repeat);
-        BaseSemantics::SValuePtr value = ops->readMemory(d->REG_ES, ops->readRegister(d->REG_EDI), in_loop, nbits);
-        ops->writeMemory(d->REG_ES, ops->readRegister(d->REG_EDI), value, in_loop);
-        BaseSemantics::SValuePtr step = ops->ite(ops->readRegister(d->REG_DF),
+        BaseSemantics::SValuePtr value = ops->readMemory(d->REG_ES, d->readRegister(d->REG_EDI),
+                                                         ops->undefined_(nbits), in_loop);
+        ops->writeMemory(d->REG_ES, d->readRegister(d->REG_EDI), value, in_loop);
+        BaseSemantics::SValuePtr step = ops->ite(d->readRegister(d->REG_DF),
                                                  ops->number_(32, -nbytes), ops->number_(32, nbytes));
         ops->writeRegister(d->REG_ESI,
-                           ops->add(ops->readRegister(d->REG_ESI),
+                           ops->add(d->readRegister(d->REG_ESI),
                                     ops->ite(in_loop, step, ops->number_(32, 0))));
         ops->writeRegister(d->REG_EDI,
-                           ops->add(ops->readRegister(d->REG_EDI),
+                           ops->add(d->readRegister(d->REG_EDI),
                                     ops->ite(in_loop, step, ops->number_(32, 0))));
         if (x86_repeat_none!=repeat)
             d->repLeave(repeat, in_loop, insn->get_address());
@@ -802,7 +878,7 @@ struct IP_movzx: P {
         if (dst_nbits==src_nbits) {
             d->write(args[0], d->read(args[1], src_nbits));
         } else {
-            assert(dst_nbits>src_nbits);
+            ASSERT_require(dst_nbits>src_nbits);
             d->write(args[0], ops->concat(d->read(args[1], src_nbits), ops->number_(dst_nbits-src_nbits, 0)));
         }
     }
@@ -815,7 +891,7 @@ struct IP_mul: P {
         size_t nbits = asm_type_width(args[0]->get_type());
         RegisterDescriptor reg0 = d->REG_AX; reg0.set_nbits(nbits);
         RegisterDescriptor reg1 = d->REG_DX; reg1.set_nbits(nbits);
-        BaseSemantics::SValuePtr op0 = ops->readRegister(reg0);
+        BaseSemantics::SValuePtr op0 = d->readRegister(reg0);
         BaseSemantics::SValuePtr op1 = d->read(args[0], nbits);
         BaseSemantics::SValuePtr result = ops->unsignedMultiply(op0, op1);
         if (8==nbits) {
@@ -874,16 +950,46 @@ struct IP_or: P {
     }
 };
 
+// Packed align right
+struct IP_palignr: P {
+    void p(D d, Ops ops, I insn, A args) {
+        assert_args(insn, args, 3);
+        size_t nbits = asm_type_width(args[0]->get_type());
+        if (64!=nbits && 128!=nbits) {
+            throw BaseSemantics::Exception("first operand must be 64 or 128 bits wide (actual " +
+                                           StringUtility::plural(nbits, "bits") + ")", insn);
+        }
+        if (args[0]->get_type() != args[1]->get_type())
+            throw BaseSemantics::Exception("first and second operands must be the same type", insn);
+        SgAsmIntegerValueExpression *nBytes = isSgAsmIntegerValueExpression(args[2]);
+        if (!nBytes)
+            throw BaseSemantics::Exception("third operand must be a byte value expression (imm8)", insn);
+        BaseSemantics::SValuePtr wide = ops->concat(d->read(args[0], nbits), d->read(args[1], nbits));
+        BaseSemantics::SValuePtr result = ops->extract(ops->shiftRight(wide, d->number_(8, nBytes->get_value() * 8)),
+                                                       0, nbits);
+        d->write(args[0], result);
+    }
+};
+
 // Pop from stack
 struct IP_pop: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 1);
-        if (insn->get_addressSize() != x86_insnsize_32 || insn->get_operandSize() != x86_insnsize_32)
-            throw BaseSemantics::Exception("size not implemented", insn);
-        BaseSemantics::SValuePtr oldSp = ops->readRegister(d->REG_ESP);
-        BaseSemantics::SValuePtr newSp = ops->add(oldSp, ops->number_(32, 4));
+
+        // Assuming the address size attribute of the stack segment is set to 32 bits.
+        size_t operandWidth = asm_type_width(args[0]->get_type());
+        if (16!=operandWidth && 32!=operandWidth)
+            throw BaseSemantics::Exception(StringUtility::numberToString(operandWidth)+"-bit operand not supported for POP",
+                                           insn);
+        
+        // Increment the stack pointer before writing to args[0] just in case args[0] is ESP-relative
+        size_t stackDelta = operandWidth / 8;
+        BaseSemantics::SValuePtr oldSp = d->readRegister(d->REG_ESP);
+        BaseSemantics::SValuePtr newSp = ops->add(oldSp, ops->number_(32, stackDelta));
         ops->writeRegister(d->REG_ESP, newSp);
-        d->write(args[0], ops->readMemory(d->REG_SS, oldSp, ops->boolean_(true), 32));
+
+        // Read from stack and write to args[0]
+        d->write(args[0], ops->readMemory(d->REG_SS, oldSp, ops->undefined_(operandWidth), ops->boolean_(true)));
     }
 };
 
@@ -893,23 +999,30 @@ struct IP_popad: P {
         assert_args(insn, args, 0);
         if (insn->get_addressSize() != x86_insnsize_32)
             throw BaseSemantics::Exception("size not implemented", insn);
-        BaseSemantics::SValuePtr oldSp = ops->readRegister(d->REG_ESP);
+        BaseSemantics::SValuePtr oldSp = d->readRegister(d->REG_ESP);
         BaseSemantics::SValuePtr newSp = ops->add(oldSp, ops->number_(32, 32));
         ops->writeRegister(d->REG_EDI,
-                           ops->readMemory(d->REG_SS, oldSp, ops->boolean_(true), 32));
+                           ops->readMemory(d->REG_SS, oldSp, ops->undefined_(32), ops->boolean_(true)));
         ops->writeRegister(d->REG_ESI,
-                           ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 4)), ops->boolean_(true), 32));
+                           ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 4)),
+                                           ops->undefined_(32), ops->boolean_(true)));
         ops->writeRegister(d->REG_EBP,
-                           ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 8)), ops->boolean_(true), 32));
+                           ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 8)),
+                                           ops->undefined_(32), ops->boolean_(true)));
         ops->writeRegister(d->REG_EBX,
-                           ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 16)), ops->boolean_(true), 32));
+                           ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 16)),
+                                           ops->undefined_(32), ops->boolean_(true)));
         ops->writeRegister(d->REG_EDX,
-                           ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 20)), ops->boolean_(true), 32));
+                           ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 20)),
+                                           ops->undefined_(32), ops->boolean_(true)));
         ops->writeRegister(d->REG_ECX,
-                           ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 24)), ops->boolean_(true), 32));
+                           ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 24)),
+                                           ops->undefined_(32), ops->boolean_(true)));
         ops->writeRegister(d->REG_EAX,
-                           ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 28)), ops->boolean_(true), 32));
-        (void) ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 12)), ops->boolean_(true), 32);
+                           ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 28)),
+                                           ops->undefined_(32), ops->boolean_(true)));
+        (void) ops->readMemory(d->REG_SS, ops->add(oldSp, ops->number_(32, 12)),
+                               ops->undefined_(32), ops->boolean_(true));
         ops->writeRegister(d->REG_ESP, newSp);
     }
 };
@@ -918,12 +1031,29 @@ struct IP_popad: P {
 struct IP_push: P {
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 1);
-        if (insn->get_addressSize() != x86_insnsize_32 || insn->get_operandSize() != x86_insnsize_32)
-            throw BaseSemantics::Exception("size not implemented", insn);
-        BaseSemantics::SValuePtr oldSp = ops->readRegister(d->REG_ESP);
-        BaseSemantics::SValuePtr newSp = ops->add(oldSp, ops->number_(32, -4));
-        ops->writeMemory(d->REG_SS, newSp, d->read(args[0], 32), ops->boolean_(true));
+        size_t operandWidth = asm_type_width(args[0]->get_type());
+        bool isImmediate = isSgAsmIntegerValueExpression(args[0])!=NULL;
+
+        // Assuming the address size attribute of the stack segment is set to 32 bits.
+        BaseSemantics::SValuePtr toPush;
+        if (isImmediate) {
+            toPush = ops->signExtend(d->read(args[0], operandWidth), 32);
+        } else if (16==operandWidth || 32==operandWidth) {
+            toPush = d->read(args[0], operandWidth);
+        } else {
+            throw BaseSemantics::Exception("invalid operand size for 32-bit push", insn);
+        }
+        ASSERT_not_null(toPush);
+        ASSERT_require(toPush->get_width()==16 || toPush->get_width()==32);
+        
+        // Decrement stack pointer. The source operand must have been read already (i.e., "push esp" pushes the old value)
+        int stackDelta = toPush->get_width() / 8;
+        BaseSemantics::SValuePtr oldSp = d->readRegister(d->REG_ESP);
+        BaseSemantics::SValuePtr newSp = ops->add(oldSp, ops->number_(32, -stackDelta));
         ops->writeRegister(d->REG_ESP, newSp);
+
+        // Write data to stack
+        ops->writeMemory(d->REG_SS, newSp, toPush, ops->boolean_(true));
     }
 };
 
@@ -933,24 +1063,24 @@ struct IP_pushad: P {
         assert_args(insn, args, 0);
         if (insn->get_addressSize() != x86_insnsize_32)
             throw BaseSemantics::Exception("size not implemented", insn);
-        BaseSemantics::SValuePtr oldSp = ops->readRegister(d->REG_ESP);
+        BaseSemantics::SValuePtr oldSp = d->readRegister(d->REG_ESP);
         BaseSemantics::SValuePtr newSp = ops->add(oldSp, ops->number_(32, -32));
         ops->writeMemory(d->REG_SS, newSp,
-                         ops->readRegister(d->REG_EDI), ops->boolean_(true));
+                         d->readRegister(d->REG_EDI), ops->boolean_(true));
         ops->writeMemory(d->REG_SS, ops->add(newSp, ops->number_(32, 4)),
-                         ops->readRegister(d->REG_ESI), ops->boolean_(true));
+                         d->readRegister(d->REG_ESI), ops->boolean_(true));
         ops->writeMemory(d->REG_SS, ops->add(newSp, ops->number_(32, 8)),
-                         ops->readRegister(d->REG_EBP), ops->boolean_(true));
+                         d->readRegister(d->REG_EBP), ops->boolean_(true));
         ops->writeMemory(d->REG_SS, ops->add(newSp, ops->number_(32, 12)),
                          oldSp, ops->boolean_(true));
         ops->writeMemory(d->REG_SS, ops->add(newSp, ops->number_(32, 16)),
-                         ops->readRegister(d->REG_EBX), ops->boolean_(true));
+                         d->readRegister(d->REG_EBX), ops->boolean_(true));
         ops->writeMemory(d->REG_SS, ops->add(newSp, ops->number_(32, 20)),
-                         ops->readRegister(d->REG_EDX), ops->boolean_(true));
+                         d->readRegister(d->REG_EDX), ops->boolean_(true));
         ops->writeMemory(d->REG_SS, ops->add(newSp, ops->number_(32, 24)),
-                         ops->readRegister(d->REG_ECX), ops->boolean_(true));
+                         d->readRegister(d->REG_ECX), ops->boolean_(true));
         ops->writeMemory(d->REG_SS, ops->add(newSp, ops->number_(32, 28)),
-                         ops->readRegister(d->REG_EAX), ops->boolean_(true));
+                         d->readRegister(d->REG_EAX), ops->boolean_(true));
         ops->writeRegister(d->REG_ESP, newSp);
     }
 };
@@ -961,10 +1091,35 @@ struct IP_pushfd: P {
         assert_args(insn, args, 0);
         if (insn->get_addressSize() != x86_insnsize_32)
             throw BaseSemantics::Exception("size not implemented", insn);
-        BaseSemantics::SValuePtr oldSp = ops->readRegister(d->REG_ESP);
+        BaseSemantics::SValuePtr oldSp = d->readRegister(d->REG_ESP);
         BaseSemantics::SValuePtr newSp = ops->add(oldSp, ops->number_(32, -4));
-        ops->writeMemory(d->REG_SS, newSp, ops->readRegister(d->REG_EFLAGS), ops->boolean_(true));
+        ops->writeMemory(d->REG_SS, newSp, d->readRegister(d->REG_EFLAGS), ops->boolean_(true));
         ops->writeRegister(d->REG_ESP, newSp);
+    }
+};
+
+// Bitwise XOR
+struct IP_pxor: P {
+    void p(D d, Ops ops, I insn, A args) {
+        assert_args(insn, args, 2);
+        size_t nbits = asm_type_width(args[0]->get_type());
+        if (nbits!=asm_type_width(args[1]->get_type()))
+            throw BaseSemantics::Exception("PXOR operands must be the same width", insn);
+        BaseSemantics::SValuePtr result;
+
+        // XOR of a register with itself is an x86 idiom for setting the register to zero, so treat it as such
+        if (isSgAsmRegisterReferenceExpression(args[0]) && isSgAsmRegisterReferenceExpression(args[1])) {
+            RegisterDescriptor r1 = isSgAsmRegisterReferenceExpression(args[0])->get_descriptor();
+            RegisterDescriptor r2 = isSgAsmRegisterReferenceExpression(args[1])->get_descriptor();
+            if (r1==r2)
+                result = ops->number_(nbits, 0);
+        }
+
+        // The non-idiomatic behavior
+        if (result==NULL)
+            result = ops->xor_(d->read(args[0], nbits), d->read(args[1], nbits));
+
+        d->write(args[0], result);
     }
 };
 
@@ -976,9 +1131,10 @@ struct IP_ret: P {
         if (insn->get_addressSize() != x86_insnsize_32 || insn->get_operandSize() != x86_insnsize_32)
             throw BaseSemantics::Exception("size not implemented", insn);
         BaseSemantics::SValuePtr extraBytes = (args.size()==1 ? d->read(args[0], 32) : ops->number_(32, 0));
-        BaseSemantics::SValuePtr oldSp = ops->readRegister(d->REG_ESP);
+        BaseSemantics::SValuePtr oldSp = d->readRegister(d->REG_ESP);
         BaseSemantics::SValuePtr newSp = ops->add(oldSp, ops->add(ops->number_(32, 4), extraBytes));
-        ops->writeRegister(d->REG_EIP, ops->filterReturnTarget(ops->readMemory(d->REG_SS, oldSp, ops->boolean_(true), 32)));
+        ops->writeRegister(d->REG_EIP, ops->filterReturnTarget(ops->readMemory(d->REG_SS, oldSp, ops->undefined_(32),
+                                                                               ops->boolean_(true))));
         ops->writeRegister(d->REG_ESP, newSp);
     }
 };
@@ -988,18 +1144,18 @@ struct IP_rotate: P {
     const X86InstructionKind kind;
     const bool with_cf;
     IP_rotate(X86InstructionKind k): kind(k), with_cf(x86_rcl==kind || x86_rcr==kind) {
-        assert(x86_rcl==k || x86_rcr==k || x86_rol==k || x86_ror==k);
+        ASSERT_require(x86_rcl==k || x86_rcr==k || x86_rol==k || x86_ror==k);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 2);
-        assert(insn->get_kind()==kind);
+        ASSERT_require(insn->get_kind()==kind);
         size_t nbits = asm_type_width(args[0]->get_type());
         // FIXME: Intel documentation contains conflicting statements about the number of significant bits in the rotate count.
         // We're doing what seems most reasonable: 6-bit counts for any operand (inc. CF) that's wider than 32 bits.
         size_t rotateWidth = (nbits>32 || (32==nbits && with_cf)) ? 6 : 5;
         BaseSemantics::SValuePtr operand = d->read(args[0], nbits);
         if (with_cf)
-            operand = ops->concat(operand, ops->readRegister(d->REG_CF));
+            operand = ops->concat(operand, d->readRegister(d->REG_CF));
         BaseSemantics::SValuePtr rotateCount = d->read(args[1], 8);
         BaseSemantics::SValuePtr result = d->doRotateOperation(kind, operand, rotateCount, rotateWidth);
         // flags have been updated; we just need to store the result
@@ -1015,7 +1171,7 @@ struct IP_sbb: P {
         assert_args(insn, args, 2);
         size_t nbits = asm_type_width(args[0]->get_type());
         BaseSemantics::SValuePtr result = d->doAddOperation(d->read(args[0], nbits), ops->invert(d->read(args[1], nbits)),
-                                                            true, ops->readRegister(d->REG_CF));
+                                                            true, d->readRegister(d->REG_CF));
         d->write(args[0], result);
     }
 };
@@ -1026,7 +1182,7 @@ struct IP_scanstring: P {
     const size_t nbits;
     const size_t nbytes;
     IP_scanstring(X86RepeatPrefix repeat, size_t nbits): repeat(repeat), nbits(nbits), nbytes(nbits/8) {
-        assert(8==nbits || 16==nbits || 32==nbits);
+        ASSERT_require(8==nbits || 16==nbits || 32==nbits);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 0);
@@ -1034,14 +1190,15 @@ struct IP_scanstring: P {
             throw BaseSemantics::Exception("size not implemented", insn);
         BaseSemantics::SValuePtr in_loop = d->repEnter(repeat);
         RegisterDescriptor regA = d->REG_EAX; regA.set_nbits(nbits);
-        BaseSemantics::SValuePtr value = ops->readMemory(d->REG_ES, ops->readRegister(d->REG_EDI), in_loop, nbits);
-        d->doAddOperation(ops->readRegister(regA), ops->invert(value), true, ops->boolean_(false), in_loop);
-        BaseSemantics::SValuePtr step = ops->ite(ops->readRegister(d->REG_DF),
+        BaseSemantics::SValuePtr value = ops->readMemory(d->REG_ES, d->readRegister(d->REG_EDI),
+                                                         ops->undefined_(nbits), in_loop);
+        d->doAddOperation(d->readRegister(regA), ops->invert(value), true, ops->boolean_(false), in_loop);
+        BaseSemantics::SValuePtr step = ops->ite(d->readRegister(d->REG_DF),
                                                  ops->number_(32, -nbytes), ops->number_(32, nbytes));
         ops->writeRegister(d->REG_EDI, 
                            ops->ite(in_loop,
-                                    ops->add(ops->readRegister(d->REG_EDI), step),
-                                    ops->readRegister(d->REG_EDI)));
+                                    ops->add(d->readRegister(d->REG_EDI), step),
+                                    d->readRegister(d->REG_EDI)));
         if (x86_repeat_none!=repeat)
             d->repLeave(repeat, in_loop, insn->get_address());
     }
@@ -1051,13 +1208,13 @@ struct IP_scanstring: P {
 struct IP_setcc: P {
     const X86InstructionKind kind;
     IP_setcc(X86InstructionKind k): kind(k) {
-        assert(x86_setne==k || x86_sete==k || x86_setno==k || x86_seto==k || x86_setpo==k || x86_setpe==k ||
-               x86_setns==k || x86_sets==k || x86_setae==k || x86_setb==k || x86_setbe==k || x86_seta==k ||
-               x86_setle==k || x86_setg==k || x86_setge==k || x86_setl==k);
+        ASSERT_require(x86_setne==k || x86_sete==k || x86_setno==k || x86_seto==k || x86_setpo==k || x86_setpe==k ||
+                       x86_setns==k || x86_sets==k || x86_setae==k || x86_setb==k || x86_setbe==k || x86_seta==k ||
+                       x86_setle==k || x86_setg==k || x86_setge==k || x86_setl==k);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 1);
-        assert(insn->get_kind()==kind);
+        ASSERT_require(insn->get_kind()==kind);
         BaseSemantics::SValuePtr cond = d->flagsCombo(kind);
         d->write(args[0], ops->concat(cond, ops->number_(7, 0)));
     }
@@ -1067,11 +1224,11 @@ struct IP_setcc: P {
 struct IP_shift: P {
     const X86InstructionKind kind;
     IP_shift(X86InstructionKind k): kind(k) {
-        assert(x86_shr==k || x86_sar==k || x86_shl==k || x86_shld==k || x86_shrd==k);
+        ASSERT_require(x86_shr==k || x86_sar==k || x86_shl==k || x86_shld==k || x86_shrd==k);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 2);
-        assert(insn->get_kind()==kind);
+        ASSERT_require(insn->get_kind()==kind);
         size_t nbits = asm_type_width(args[0]->get_type());
         size_t shiftSignificantBits = nbits <= 32 ? 5 : 7;
         BaseSemantics::SValuePtr result = d->doShiftOperation(insn->get_kind(), d->read(args[0], nbits),
@@ -1103,7 +1260,7 @@ struct IP_storestring: P {
     const size_t nbits;
     const size_t nbytes;
     IP_storestring(X86RepeatPrefix repeat, size_t nbits): repeat(repeat), nbits(nbits), nbytes(nbits/8) {
-        assert(8==nbits || 16==nbits || 32==nbits);
+        ASSERT_require(8==nbits || 16==nbits || 32==nbits);
     }
     void p(D d, Ops ops, I insn, A args) {
         assert_args(insn, args, 0);
@@ -1111,17 +1268,28 @@ struct IP_storestring: P {
             throw BaseSemantics::Exception("address size must be 32 bits", insn);
         BaseSemantics::SValuePtr in_loop = d->repEnter(repeat);
         RegisterDescriptor regA = d->REG_EAX; regA.set_nbits(nbits);
-        ops->writeMemory(d->REG_ES, ops->readRegister(d->REG_EDI), ops->readRegister(regA), in_loop);
-        BaseSemantics::SValuePtr step = ops->ite(ops->readRegister(d->REG_DF),
+        ops->writeMemory(d->REG_ES, d->readRegister(d->REG_EDI), d->readRegister(regA), in_loop);
+        BaseSemantics::SValuePtr step = ops->ite(d->readRegister(d->REG_DF),
                                                  ops->number_(32, -nbytes), ops->number_(32, nbytes));
 
         /* Update DI */
         ops->writeRegister(d->REG_EDI,
                            ops->ite(in_loop,
-                                    ops->add(ops->readRegister(d->REG_EDI), step),
-                                    ops->readRegister(d->REG_EDI)));
+                                    ops->add(d->readRegister(d->REG_EDI), step),
+                                    d->readRegister(d->REG_EDI)));
         if (x86_repeat_none!=repeat)
             d->repLeave(repeat, in_loop, insn->get_address());
+    }
+};
+
+// Store SSE control and status register
+struct IP_stmxcsr: P {
+    void p(D d, Ops ops, I insn, A args) {
+        assert_args(insn, args, 1);
+        size_t nbits = asm_type_width(args[0]->get_type());
+        if (nbits!=32)
+            throw BaseSemantics::Exception("STMXCSR operand must be 32 bits", insn);
+        d->write(args[0], d->readRegister(d->REG_MXCSR));
     }
 };
 
@@ -1155,6 +1323,14 @@ struct IP_test: P {
         ops->writeRegister(d->REG_OF, ops->boolean_(false));
         ops->writeRegister(d->REG_AF, ops->undefined_(1));
         ops->writeRegister(d->REG_CF, ops->boolean_(false));
+    }
+};
+
+// Wait (check for and handle unmasked floating-point exceptions)
+struct IP_wait: P {
+    void p(D d, Ops ops, I insn, A args) {
+        // FIXME[Robb P. Matzke 2014-05-12]: currenty a no-op
+        assert_args(insn, args, 0);
     }
 };
 
@@ -1262,8 +1438,12 @@ DispatcherX86::iproc_init()
     iproc_set(x86_cwde,         new X86::IP_cwde);
     iproc_set(x86_dec,          new X86::IP_dec);
     iproc_set(x86_div,          new X86::IP_divide(x86_div));
+    iproc_set(x86_fld,          new X86::IP_fld);
     iproc_set(x86_fldcw,        new X86::IP_fldcw);
     iproc_set(x86_fnstcw,       new X86::IP_fnstcw);
+    iproc_set(x86_fnstsw,       new X86::IP_fnstsw);
+    iproc_set(x86_fst,          new X86::IP_fst);
+    iproc_set(x86_fstp,         new X86::IP_fstp);
     iproc_set(x86_hlt,          new X86::IP_hlt);
     iproc_set(x86_idiv,         new X86::IP_divide(x86_idiv));
     iproc_set(x86_imul,         new X86::IP_imul);
@@ -1297,6 +1477,9 @@ DispatcherX86::iproc_init()
     iproc_set(x86_loopnz,       new X86::IP_loop(x86_loopnz));
     iproc_set(x86_loopz,        new X86::IP_loop(x86_loopz));
     iproc_set(x86_mov,          new X86::IP_mov);
+    iproc_set(x86_movd,         new X86::IP_move_extend);
+    iproc_set(x86_movdqa,       new X86::IP_movdqa);
+    iproc_set(x86_movq,         new X86::IP_move_extend);
     iproc_set(x86_movsb,        new X86::IP_movestring(x86_repeat_none, 8));
     iproc_set(x86_movsw,        new X86::IP_movestring(x86_repeat_none, 16));
     iproc_set(x86_movsd,        new X86::IP_movestring(x86_repeat_none, 32));
@@ -1307,11 +1490,13 @@ DispatcherX86::iproc_init()
     iproc_set(x86_nop,          new X86::IP_nop);
     iproc_set(x86_not,          new X86::IP_not);
     iproc_set(x86_or,           new X86::IP_or);
+    iproc_set(x86_palignr,      new X86::IP_palignr);
     iproc_set(x86_pop,          new X86::IP_pop);
     iproc_set(x86_popad,        new X86::IP_popad);
     iproc_set(x86_push,         new X86::IP_push);
     iproc_set(x86_pushad,       new X86::IP_pushad);
     iproc_set(x86_pushfd,       new X86::IP_pushfd);
+    iproc_set(x86_pxor,         new X86::IP_pxor);
     iproc_set(x86_rcl,          new X86::IP_rotate(x86_rcl));
     iproc_set(x86_rcr,          new X86::IP_rotate(x86_rcr));
     iproc_set(x86_rdtsc,        new X86::IP_rdtsc);
@@ -1369,9 +1554,11 @@ DispatcherX86::iproc_init()
     iproc_set(x86_stosb,        new X86::IP_storestring(x86_repeat_none, 8));
     iproc_set(x86_stosw,        new X86::IP_storestring(x86_repeat_none, 16));
     iproc_set(x86_stosd,        new X86::IP_storestring(x86_repeat_none, 32));
+    iproc_set(x86_stmxcsr,      new X86::IP_stmxcsr);
     iproc_set(x86_sub,          new X86::IP_sub);
     iproc_set(x86_sysenter,     new X86::IP_sysenter);
     iproc_set(x86_test,         new X86::IP_test);
+    iproc_set(x86_wait,         new X86::IP_wait);
     iproc_set(x86_xadd,         new X86::IP_xadd);
     iproc_set(x86_xchg,         new X86::IP_xchg);
     iproc_set(x86_xor,          new X86::IP_xor);
@@ -1410,7 +1597,30 @@ DispatcherX86::regcache_init()
         REG_DS = findRegister("ds", 16);
         REG_ES = findRegister("es", 16);
         REG_SS = findRegister("ss", 16);
+
+        REG_ST0 = findRegister("st0", 80);
+        REG_FPSTATUS = findRegister("fpstatus", 16);
+        REG_FPSTATUS_TOP = findRegister("fpstatus_top", 3);
+        REG_FPCTL = findRegister("fpctl", 16);
+        REG_MXCSR = findRegister("mxcsr", 32);
     }
+}
+
+static bool
+isStatusRegister(const RegisterDescriptor &reg) {
+    return reg.get_major()==x86_regclass_flags && reg.get_minor()==x86_flags_status;
+}
+
+RegisterDictionary::RegisterDescriptors
+DispatcherX86::get_usual_registers() const
+{
+    RegisterDictionary::RegisterDescriptors registers = regdict->get_largest_registers();
+    registers.erase(std::remove_if(registers.begin(), registers.end(), isStatusRegister), registers.end());
+    BOOST_FOREACH (const RegisterDescriptor &reg, regdict->get_smallest_registers()) {
+        if (isStatusRegister(reg))
+            registers.push_back(reg);
+    }
+    return registers;
 }
 
 void
@@ -1432,7 +1642,7 @@ DispatcherX86::setFlagsForResult(const BaseSemantics::SValuePtr &result)
 void
 DispatcherX86::setFlagsForResult(const BaseSemantics::SValuePtr &result, const BaseSemantics::SValuePtr &cond)
 {
-    assert(cond->get_width()==1);
+    ASSERT_require(cond->get_width()==1);
     BaseSemantics::SValuePtr lo_byte = operators->extract(result, 0, 8);
     BaseSemantics::SValuePtr signbit = operators->extract(result, result->get_width()-1, result->get_width());
     operators->writeRegister(REG_PF, operators->ite(cond, parity(lo_byte), operators->readRegister(REG_PF)));
@@ -1443,7 +1653,7 @@ DispatcherX86::setFlagsForResult(const BaseSemantics::SValuePtr &result, const B
 BaseSemantics::SValuePtr
 DispatcherX86::parity(const BaseSemantics::SValuePtr &v)
 {
-    assert(v->get_width()==8);
+    ASSERT_require(v->get_width()==8);
     BaseSemantics::SValuePtr p01 = operators->xor_(operators->extract(v, 0, 1), operators->extract(v, 1, 2));
     BaseSemantics::SValuePtr p23 = operators->xor_(operators->extract(v, 2, 3), operators->extract(v, 3, 4));
     BaseSemantics::SValuePtr p45 = operators->xor_(operators->extract(v, 4, 5), operators->extract(v, 5, 6));
@@ -1550,8 +1760,7 @@ DispatcherX86::flagsCombo(X86InstructionKind k)
         case x86_jecxz:
             return operators->equalToZero(operators->readRegister(REG_ECX));
         default:
-            assert(!"instruction kind not handled");
-            abort();
+            ASSERT_not_reachable("instruction kind not handled");
         }
 }
 
@@ -1568,7 +1777,7 @@ DispatcherX86::repEnter(X86RepeatPrefix repeat)
 void
 DispatcherX86::repLeave(X86RepeatPrefix repeat_prefix, const BaseSemantics::SValuePtr &in_loop, rose_addr_t insn_va)
 {
-    assert(in_loop!=NULL && in_loop->get_width()==1);
+    ASSERT_require(in_loop!=NULL && in_loop->get_width()==1);
 
     // conditionally decrement the ECX register
     BaseSemantics::SValuePtr new_ecx = operators->add(operators->readRegister(REG_ECX),
@@ -1604,8 +1813,8 @@ BaseSemantics::SValuePtr
 DispatcherX86::doAddOperation(const BaseSemantics::SValuePtr &a, const BaseSemantics::SValuePtr &b,
                               bool invertCarries, const BaseSemantics::SValuePtr &carryIn)
 {
-    assert(a->get_width()==b->get_width());
-    assert(1==carryIn->get_width());
+    ASSERT_require(a->get_width()==b->get_width());
+    ASSERT_require(1==carryIn->get_width());
     size_t nbits = a->get_width();
     BaseSemantics::SValuePtr carries;
     BaseSemantics::SValuePtr result = operators->addWithCarries(a, b, invertMaybe(carryIn, invertCarries), carries/*out*/);
@@ -1623,9 +1832,9 @@ DispatcherX86::doAddOperation(const BaseSemantics::SValuePtr &a, const BaseSeman
                               bool invertCarries, const BaseSemantics::SValuePtr &carryIn,
                               const BaseSemantics::SValuePtr &cond)
 {
-    assert(a->get_width()==b->get_width());
-    assert(1==carryIn->get_width());
-    assert(cond!=NULL && cond->get_width()==1);
+    ASSERT_require(a->get_width()==b->get_width());
+    ASSERT_require(1==carryIn->get_width());
+    ASSERT_require(cond!=NULL && cond->get_width()==1);
     size_t nbits = a->get_width();
     BaseSemantics::SValuePtr carries;
     BaseSemantics::SValuePtr result = operators->addWithCarries(a, b, invertMaybe(carryIn, invertCarries), carries/*out*/);
@@ -1671,8 +1880,8 @@ BaseSemantics::SValuePtr
 DispatcherX86::doRotateOperation(X86InstructionKind kind, const BaseSemantics::SValuePtr &operand,
                                  const BaseSemantics::SValuePtr &total_rotate, size_t rotateSignificantBits)
 {
-    assert(x86_rcl==kind || x86_rcr==kind || x86_rol==kind || x86_ror==kind);
-    assert(total_rotate->get_width()==8 && rotateSignificantBits<8);
+    ASSERT_require(x86_rcl==kind || x86_rcr==kind || x86_rol==kind || x86_ror==kind);
+    ASSERT_require(total_rotate->get_width()==8 && rotateSignificantBits<8);
 
     // The 8086 does not mask the rotate count; processors starting with the 80286 (including virtual-8086 mode) do mask. We
     // will always mask. The effect (other than timing) is the same either way.
@@ -1700,10 +1909,9 @@ DispatcherX86::doRotateOperation(X86InstructionKind kind, const BaseSemantics::S
             result = operators->rotateRight(operand, maskedRotateCount);
             break;
         default:
-            assert(!"instruction not handled");
-            abort();
+            ASSERT_not_reachable("instruction not handled");
     }
-    assert(result->get_width()==operand->get_width());
+    ASSERT_require(result->get_width()==operand->get_width());
 
     // Compute the new CF value.
     BaseSemantics::SValuePtr new_cf;
@@ -1717,8 +1925,7 @@ DispatcherX86::doRotateOperation(X86InstructionKind kind, const BaseSemantics::S
             new_cf = operators->extract(result, 0, 1);
             break;
         default:
-            assert(!"instruction not handled");
-            abort();
+            ASSERT_not_reachable("instruction not handled");
     }
 
     // Compute the new OF value.  The new OF value is only used for 1-bit rotates.
@@ -1738,8 +1945,7 @@ DispatcherX86::doRotateOperation(X86InstructionKind kind, const BaseSemantics::S
                                      operators->extract(result, result->get_width()-1, result->get_width()));
             break;
         default:
-            assert(!"instruction not handled");
-            abort();
+            ASSERT_not_reachable("instruction not handled");
     }
 
     // Update CF and OF flags. SF, ZF, AF, and PF are not affected.
@@ -1756,9 +1962,9 @@ DispatcherX86::doShiftOperation(X86InstructionKind kind, const BaseSemantics::SV
                                 const BaseSemantics::SValuePtr &source_bits, const BaseSemantics::SValuePtr &total_shift,
                                 size_t shiftSignificantBits)
 {
-    assert(x86_shr==kind || x86_sar==kind || x86_shl==kind || x86_shld==kind || x86_shrd==kind);
-    assert(operand->get_width()==source_bits->get_width());
-    assert(total_shift->get_width()==8 && shiftSignificantBits<8);
+    ASSERT_require(x86_shr==kind || x86_sar==kind || x86_shl==kind || x86_shld==kind || x86_shrd==kind);
+    ASSERT_require(operand->get_width()==source_bits->get_width());
+    ASSERT_require(total_shift->get_width()==8 && shiftSignificantBits<8);
 
     // The 8086 does not mask the shift count; processors starting with the 80286 (including virtual-8086 mode) do
     // mask.  The effect (other than timing) is the same either way.
@@ -1806,10 +2012,9 @@ DispatcherX86::doShiftOperation(X86InstructionKind kind, const BaseSemantics::SV
                                                                                         operators->negate(maskedShiftCount)))));
             break;
         default:
-            assert(!"instruction not handled");
-            abort();
+            ASSERT_not_reachable("instruction not handled");
     }
-    assert(operand->get_width()==result->get_width());
+    ASSERT_require(operand->get_width()==result->get_width());
     BaseSemantics::SValuePtr originalSign = operators->extract(operand, operand->get_width()-1, operand->get_width());
     BaseSemantics::SValuePtr resultSign = operators->extract(result, result->get_width()-1, result->get_width());
 
@@ -1887,5 +2092,73 @@ DispatcherX86::doShiftOperation(X86InstructionKind kind, const BaseSemantics::SV
     return result;
 }
 
+BaseSemantics::SValuePtr
+DispatcherX86::readRegister(const RegisterDescriptor &reg) {
+    // When reading FLAGS, EFLAGS as a whole do not coalesce individual flags into the single register.
+    if (reg.get_major()==x86_regclass_flags && reg.get_offset()==0 && reg.get_nbits()>1) {
+        BaseSemantics::RegisterStatePtr rs = operators->get_state()->get_register_state();
+        if (BaseSemantics::RegisterStateGeneric *rsg = dynamic_cast<BaseSemantics::RegisterStateGeneric*>(rs.get())) {
+            BaseSemantics::RegisterStateGeneric::NoCoalesceOnRead guard(rsg);
+            return operators->readRegister(reg);
+        }
+    }
+    return operators->readRegister(reg);
+}
+
+void
+DispatcherX86::write(SgAsmExpression *e, const BaseSemantics::SValuePtr &value, size_t addr_nbits/*=0*/)
+{
+    if (SgAsmDirectRegisterExpression *re = isSgAsmDirectRegisterExpression(e)) {
+        RegisterDescriptor reg = re->get_descriptor();
+        if (reg.get_major()==x86_regclass_st && reg.get_minor()>=0 && reg.get_minor()<8 &&
+            reg.get_offset()==0 && reg.get_nbits()==64) {
+            // When writing to an MM register, the high-order 16 bits are set in order to make the underlying
+            // ST register NaN.
+            reg.set_nbits(80);
+            operators->writeRegister(reg, operators->concat(value, number_(16, 0xffff)));
+            return;
+        }
+    }
+    Dispatcher::write(e, value, addr_nbits);            // defer to super class
+}
+
+void
+DispatcherX86::pushFloatingPoint(const BaseSemantics::SValuePtr &value)
+{
+    BaseSemantics::SValuePtr topOfStack = operators->readRegister(REG_FPSTATUS_TOP);
+    if (!topOfStack->is_number())
+        throw BaseSemantics::Exception("FP-stack top is not concrete", NULL);
+    BaseSemantics::SValuePtr newTopOfStack = operators->add(topOfStack, operators->number_(topOfStack->get_width(), -1));
+    ASSERT_require2(newTopOfStack->is_number(), "constant folding is required for FP-stack");
+
+    RegisterDescriptor reg(REG_ST0.get_major(), (REG_ST0.get_minor() + newTopOfStack->get_number()) % 8,
+                           REG_ST0.get_offset(), REG_ST0.get_nbits());
+    operators->writeRegister(reg, value);
+    operators->writeRegister(REG_FPSTATUS_TOP, newTopOfStack);
+}
+
+BaseSemantics::SValuePtr
+DispatcherX86::readFloatingPointStack(size_t position)
+{
+    BaseSemantics::SValuePtr topOfStack = operators->readRegister(REG_FPSTATUS_TOP);
+    if (!topOfStack->is_number())
+        throw BaseSemantics::Exception("FP-stack top is not concrete", NULL);
+    RegisterDescriptor reg(REG_ST0.get_major(), (REG_ST0.get_minor() + topOfStack->get_number()) % 8,
+                           REG_ST0.get_offset(), REG_ST0.get_nbits());
+    return operators->readRegister(reg);
+}
+
+void
+DispatcherX86::popFloatingPoint()
+{
+    BaseSemantics::SValuePtr topOfStack = operators->readRegister(REG_FPSTATUS_TOP);
+    if (!topOfStack->is_number())
+        throw BaseSemantics::Exception("FP-stack top is not concrete", NULL);
+    BaseSemantics::SValuePtr newTopOfStack = operators->add(topOfStack, operators->number_(topOfStack->get_width(), 1));
+    ASSERT_require2(newTopOfStack->is_number(), "constant folding is required for FP-stack");
+    operators->writeRegister(REG_FPSTATUS_TOP, newTopOfStack);
+}
+
+} // namespace
 } // namespace
 } // namespace

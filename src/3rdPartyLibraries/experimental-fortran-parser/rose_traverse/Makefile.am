@@ -9,8 +9,11 @@ LDADD    = $(LIBS_WITH_RPATH) $(ROSE_LIBS)
 
 # libmstlSources = PDFGeneration.C DOTGraphInterface.C
 
-noinst_LTLIBRARIES = libofp.la
-libofp_la_SOURCES = OFPNodes.C OFPExpr.C OFPUnparser.cpp UntypedASTBuilder.cpp traversal.cpp ofp_traverse_productions.C
+# noinst_LTLIBRARIES = libofp.la
+
+# DQ (9/10/2014): DISABLE THIS LIBRARY
+# lib_LTLIBRARIES = libofp.la
+# libofp_la_SOURCES = OFPNodes.C OFPExpr.C OFPUnparser.cpp UntypedASTBuilder.cpp traversal.cpp ofp_traverse_productions.C
 
 SDF_GRAMMAR_DIR = $(srcdir)/../syntax
 
@@ -92,3 +95,4 @@ traversal_f.o: traversal_f.c traversal.h
 
 clean:
 	rm -f *.o *.lo *.la $(EXES) $(OBJS)
+	rm -rf .libs

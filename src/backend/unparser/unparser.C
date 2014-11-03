@@ -24,6 +24,7 @@
 #include <string.h>
 #if _MSC_VER
 #include <direct.h>
+#include <process.h>
 #endif
 
 #include "IncludedFilesUnparser.h"
@@ -2168,12 +2169,15 @@ unparseFile ( SgFile* file, UnparseFormatHelp *unparseHelp, UnparseDelegate* unp
             // in the correct folder structure.
             SgSourceFile *sourcefile = isSgSourceFile(file);
             ROSE_ASSERT(sourcefile && "Try to unparse an SgFile not being an SgSourceFile using the java unparser");
+
+            SgProject *project = sourcefile -> get_project();
+            ROSE_ASSERT(project != NULL);
+
             SgJavaPackageStatement *package_statement = sourcefile -> get_package();
             string package_name = (package_statement ? package_statement -> get_name().getString() : "");
             //NOTE: Default package equals the empty string ""
             //ROSE_ASSERT((packageDecl != NULL) && "Couldn't find the package definition of the java source file");
             string outFolder = "";
-            SgProject *project = sourcefile -> get_project();
             string ds = project -> get_Java_source_destdir();
             if (ds != "") {
                 outFolder = ds;
@@ -2184,10 +2188,13 @@ unparseFile ( SgFile* file, UnparseFormatHelp *unparseHelp, UnparseDelegate* unp
             outFolder += package_name;
             outFolder += (package_name.size() > 0 ? "/" : "");
             // Create package folder structure
-            string mkdirCommand = string("mkdir -p ") + outFolder;
-            int status = system (mkdirCommand.c_str());
-            ROSE_ASSERT(status == 0);
+            boost::filesystem::create_directories(outFolder);
+            ROSE_ASSERT(boost::filesystem::exists(outFolder));
             outputFilename = outFolder + file -> get_sourceFileNameWithoutPath();
+            // Convert Windows-style paths to POSIX-style.
+            #ifdef _MSC_VER
+            boost::replace_all(outputFilename, "\\", "/");
+            #endif
 #if 0
             printf ("In unparseFile(): generated Java outputFilename = %s \n",outputFilename.c_str());
 #endif
@@ -2211,12 +2218,26 @@ unparseFile ( SgFile* file, UnparseFormatHelp *unparseHelp, UnparseDelegate* unp
 
        // DQ (9/15/2013): Added assertion.
           ROSE_ASSERT (file->get_unparse_output_filename().empty() == true);
-#if 0
-          printf ("In unparseFile(SgFile*): calling set_unparse_output_filename(): outputFilename = %s \n",outputFilename.c_str());
-#endif
-          file->set_unparse_output_filename(outputFilename);
-          ROSE_ASSERT (file->get_unparse_output_filename().empty() == false);
-       // printf ("Inside of SgFile::unparse(UnparseFormatHelp*,UnparseDelegate*) outputFilename = %s \n",outputFilename.c_str());
+
+        // TOO1 (3/20/2014): Clobber the original input source file X_X
+        //
+        //            **CAUTION**RED*ALERT**CAUTION**
+        //
+        SgSourceFile* source_file = isSgSourceFile(file);
+        if (source_file != NULL)
+        {
+            if (project->get_unparser__clobber_input_file())
+            {
+                outputFilename = source_file->get_sourceFileNameWithPath();
+                std::cout
+                    << "[WARN] [Unparser] Clobbering the original input file: "
+                    << outputFilename
+                    << std::endl;
+            }
+        }
+
+        file->set_unparse_output_filename(outputFilename);
+        ROSE_ASSERT (file->get_unparse_output_filename().empty() == false);
      }
 
 #if 0
@@ -2278,7 +2299,26 @@ unparseFile ( SgFile* file, UnparseFormatHelp *unparseHelp, UnparseDelegate* unp
 
                          outputFilename = alternative_filename;
                        }
+                 // Pei-Hung (8/6/2014) appending PID as alternative name to avoid collision
+                    else
+                       {
+                         if (project->get_appendPID() == true)
+                            {
+                              ostringstream os;
+                              #ifdef _MSC_VER 
+                              os << _getpid(); 
+                              #else 
+                              os << getpid(); 
+                              #endif 
+                              unsigned dot = outputFilename.find_last_of(".");
+                              outputFilename = outputFilename.substr(0,dot) + "_" + os.str() + outputFilename.substr(dot);
+                              if ( SgProject::get_verbose() > 0 )
+                                   printf ("Generate test output name with PID = %s \n",outputFilename.c_str());
+
+                            }
+                       }
                   }
+               file->set_unparse_output_filename(outputFilename);
              }
 
           fstream ROSE_OutputFile(outputFilename.c_str(),ios::out);

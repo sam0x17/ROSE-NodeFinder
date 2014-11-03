@@ -135,10 +135,13 @@ namespace StringUtility
        //  ROSE_UTIL_API std::string numberToString ( size_t x );
 
 #ifndef _MSC_VER
-  #if ((BACKEND_CXX_COMPILER_MAJOR_VERSION_NUMBER == 4) && (BACKEND_CXX_COMPILER_MINOR_VERSION_NUMBER > 6))
+// #if !defined(__STRICT_ANSI__) && defined(_GLIBCXX_USE_INT128)
+// #if ((BACKEND_CXX_COMPILER_MAJOR_VERSION_NUMBER == 4) && (BACKEND_CXX_COMPILER_MINOR_VERSION_NUMBER > 6))
+   #if (defined(BACKEND_CXX_IS_GNU_COMPILER) && (((BACKEND_CXX_COMPILER_MAJOR_VERSION_NUMBER == 4) && (BACKEND_CXX_COMPILER_MINOR_VERSION_NUMBER > 6)) || (BACKEND_CXX_COMPILER_MAJOR_VERSION_NUMBER > 4)))
         // DQ (2/22/2014): Required code for GNU versions greater than 4.6.
            ROSE_UTIL_API std::string numberToString ( __int128 x );
-  #endif
+           ROSE_UTIL_API std::string numberToString ( unsigned __int128 x );
+   #endif
 #endif
 
        // DQ (8/10/2010): Changed to take parameter as const.
@@ -439,8 +442,14 @@ namespace StringUtility
             /* Added htmlEscape necessary for QROSE work to this utility library - tps (9Oct2008) */
             ROSE_UTIL_API std::string htmlEscape(const std::string& s);
 
+   /** Escape as for C/C++ string literals. */
+   ROSE_UTIL_API std::string cEscape(const std::string&);
+
     // DQ (2/3/2009): Moved this function from attach_all_info.C
        ROSE_UTIL_API std::vector<std::string> readWordsInFile( std::string filename);
+
+   /** Convert an ASCII hexadecimal character to an integer. */
+   ROSE_UTIL_API unsigned hexadecimalToInt(char);
 
    /** Convert a number to a hexadecimal and decimal string.
     *
@@ -523,7 +532,10 @@ namespace StringUtility
        * @{ */
       template<class Container>
       std::string join(const std::string &separator, const Container &strings) {
-          return join_range(separator, strings.begin(), strings.end());
+          std::string retval;
+          for (typename Container::const_iterator i=strings.begin(); i!=strings.end(); ++i)
+              retval += (i==strings.begin() ? std::string() : separator) + *i;
+          return retval;
       }
       template<class Iterator>
       std::string join_range(const std::string &separator, Iterator begin, Iterator end) {
@@ -601,13 +613,30 @@ namespace StringUtility
      *  size_t n = ...;
      *  std::cout <<"received " <<plural(n, "values") <<"\n";
      * @encode
+     *
+     *  Output for various values of <em>n</em> will be:
+     *
+     * @code
+     *  received 0 values
+     *  received 1 value
+     *  received 2 values
+     * @endcode
+     *
+     * This function uses a handful of grade-school rules for converting the supplied plural word to a singular word when
+     * necessary.  If these are not enough, then the singular form can be supplied as the third argument.
+     *
+     * @code
+     *  std::cout <<"graph contains " <<plural(nverts, "vertices", "vertex") <<"\n";
+     * @endcode
      */
     template<typename T>
-    std::string plural(T n, const std::string &plural_word) {
+    std::string plural(T n, const std::string &plural_word, const std::string &singular_word="") {
         assert(!plural_word.empty());
         std::string retval = numberToString(n) + " ";
         if (1==n) {
-            if (plural_word.size()>3 && 0==plural_word.substr(plural_word.size()-3).compare("ies")) {
+            if (!singular_word.empty()) {
+                retval += singular_word;
+            } else if (plural_word.size()>3 && 0==plural_word.substr(plural_word.size()-3).compare("ies")) {
                 // string ends with "ies", as in "parties", so emit "party" instead
                 retval += plural_word.substr(0, plural_word.size()-3) + "y";
             } else if (plural_word.size()>1 && plural_word[plural_word.size()-1]=='s') {

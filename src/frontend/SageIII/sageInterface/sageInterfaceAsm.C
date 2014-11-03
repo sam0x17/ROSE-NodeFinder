@@ -209,19 +209,11 @@ SageInterface::get_value( SgAsmValueExpression* asmValueExpression )
   // Identify what type of value expression this is...
      switch (asmValueExpression->variantT())
         {
-          case V_SgAsmByteValueExpression:
+          case V_SgAsmIntegerValueExpression:
              {
-               SgAsmByteValueExpression* asmByteValueExpression = isSgAsmByteValueExpression(asmValueExpression);
-               value = asmByteValueExpression->get_value();
+               SgAsmIntegerValueExpression* asmIntegerValueExpression = isSgAsmIntegerValueExpression(asmValueExpression);
+               value = asmIntegerValueExpression->get_value();
             // printf ("structure field assigned (Byte) value = %zu \n",value);
-               break;
-             }
-
-          case V_SgAsmDoubleWordValueExpression:
-             {
-               SgAsmDoubleWordValueExpression* asmDoubleWordValueExpression = isSgAsmDoubleWordValueExpression(asmValueExpression);
-               value = asmDoubleWordValueExpression->get_value();
-            // printf ("structure field assigned (Double Word) value = %p \n",(void*)value);
                break;
              }
 
@@ -257,7 +249,7 @@ SageInterface::isInstructionKind ( SgAsmInstruction* asmInstruction, X86Instruct
 
      bool foundInstructionKind = false;
 
-     SgAsmx86Instruction *x86instruction = isSgAsmx86Instruction(asmInstruction);
+     SgAsmX86Instruction *x86instruction = isSgAsmX86Instruction(asmInstruction);
      ROSE_ASSERT(x86instruction != NULL);
 
   // Detect a "mov" instruction as in "mov edx, 0x8048868"
@@ -287,11 +279,11 @@ SageInterface::equivalenceTest(SgNode* x, SgNode* y)
 
      switch (x->variantT())
         {
-          case V_SgAsmx86Instruction:
+          case V_SgAsmX86Instruction:
              {
             // Look at the instruction kind only.
-               SgAsmx86Instruction* x_instruction = isSgAsmx86Instruction(x);
-               SgAsmx86Instruction* y_instruction = isSgAsmx86Instruction(y);
+               SgAsmX86Instruction* x_instruction = isSgAsmX86Instruction(x);
+               SgAsmX86Instruction* y_instruction = isSgAsmX86Instruction(y);
 
                bool isSameKind = (x_instruction->get_kind() == y_instruction->get_kind());
 
@@ -303,7 +295,8 @@ SageInterface::equivalenceTest(SgNode* x, SgNode* y)
                break;
              }
 
-          case V_SgAsmx86RegisterReferenceExpression:
+          case V_SgAsmRegisterReferenceExpression:
+          case V_SgAsmDirectRegisterExpression:
              {
                SgAsmRegisterReferenceExpression* x_exp = isSgAsmRegisterReferenceExpression(x);
                SgAsmRegisterReferenceExpression* y_exp = isSgAsmRegisterReferenceExpression(y);
@@ -311,7 +304,17 @@ SageInterface::equivalenceTest(SgNode* x, SgNode* y)
                break;
              }
 
-          case V_SgAsmDoubleWordValueExpression:
+          case V_SgAsmIndirectRegisterExpression: {
+              SgAsmIndirectRegisterExpression* x_exp = isSgAsmIndirectRegisterExpression(x);
+              SgAsmIndirectRegisterExpression* y_exp = isSgAsmIndirectRegisterExpression(y);
+              result = (x_exp->get_offset() == y_exp->get_offset() &&
+                        x_exp->get_stride() == y_exp->get_stride() &&
+                        x_exp->get_index() == y_exp->get_index() &&
+                        x_exp->get_modulus() == y_exp->get_modulus());
+              break;
+          }
+
+          case V_SgAsmIntegerValueExpression:
              {
             // Look at the instruction kind only.
             // SgAsmDoubleWordValueExpression* x_value = isSgAsmDoubleWordValueExpression(x);
@@ -508,27 +511,27 @@ SageInterface::find ( SgNode* astNode, SgNode* target, EquivalenceTestFunctionTy
 
 // DQ (4/28/2010): Added support for interface to detect NOP's.  This function is for a single instruction.
 // Not only detects x86 NOP instructions, but any instruction whose only effect is to advance the instruction
-// pointer to the fall-through address.  Works for any architecture. See SgAsmx86Instruction::has_effect() for details.
+// pointer to the fall-through address.  Works for any architecture. See SgAsmX86Instruction::hasEffect() for details.
 bool
 SageInterface::isNOP ( SgAsmInstruction* asmInstruction )
    {
-       return !asmInstruction->has_effect();
+       return !asmInstruction->hasEffect();
    }
 
 // DQ (4/28/2010): Added support for interface to detect NOP's.  This function is for a list of instructions.
 // Not only detects x86 NOP instructions, but any sequence of instructions whose only effect is to advance the instruction
-// pointer to the fall-through address.  Works for any architecture. See SgAsmx86Instruction::has_effect() for details.
+// pointer to the fall-through address.  Works for any architecture. See SgAsmX86Instruction::hasEffect() for details.
 bool
 SageInterface::isNOP ( const std::vector<SgAsmInstruction*> & asmInstructionList )
    {
        if (asmInstructionList.empty())
            return true;
-       return !asmInstructionList.front()->has_effect(asmInstructionList);
+       return !asmInstructionList.front()->hasEffect(asmInstructionList);
    }
 
 // DQ (4/28/2010): Added support for interface to detect NOP's.  This function detects NOP sequences in a SgAsmBlock.
 // Not only detects x86 NOP instructions, but any subsequence of instructions whose only effect is to advance the instruction
-// pointer to the fall-through address.  Works for any architecture. See SgAsmx86Instruction::find_noop_subsequences()
+// pointer to the fall-through address.  Works for any architecture. See SgAsmX86Instruction::findNoopSubsequences()
 // for details.
 std::vector<std::vector<SgAsmInstruction*> >
 SageInterface::find_NOP_sequences (SgAsmBlock* asmBlock)
@@ -539,7 +542,7 @@ SageInterface::find_NOP_sequences (SgAsmBlock* asmBlock)
 
        /* Find the subsequences (index,size pairs) */
        typedef std::vector<std::pair<size_t, size_t> > Subsequences;
-       Subsequences sequences = insns.front()->find_noop_subsequences(insns);
+       Subsequences sequences = insns.front()->findNoopSubsequences(insns);
 
        /* Build the return value */
        retval.reserve(sequences.size());

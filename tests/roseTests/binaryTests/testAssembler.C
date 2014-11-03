@@ -6,6 +6,8 @@
 
 #include "rose.h"
 
+using namespace rose::BinaryAnalysis;
+
 /* Collects all instructions from all basic blocks into a map by instruction address. */
 class InstructionCollector: public SgSimpleProcessing {
 public:
@@ -14,7 +16,7 @@ public:
         traverse(ast, preorder);
     }
     void visit(SgNode *node) {
-        SgAsmx86Instruction *insn = isSgAsmx86Instruction(node);
+        SgAsmX86Instruction *insn = isSgAsmX86Instruction(node);
         if (insn)
             insns[insn->get_address()] = insn;
     }
@@ -36,7 +38,7 @@ assemble_all(SgAsmInterpretation *interp)
          * We're leaving this implementation for later. For now, just assume that instructions don't move in memory. */
         rose_addr_t new_va = original_va;
 
-        SgAsmx86Instruction *insn = isSgAsmx86Instruction(ii->second);
+        SgAsmX86Instruction *insn = isSgAsmX86Instruction(ii->second);
         ROSE_ASSERT(insn!=NULL);
         SgUnsignedCharList machine_code;
         try {
@@ -46,7 +48,7 @@ assemble_all(SgAsmInterpretation *interp)
             ++nassembled;
         } catch (const Assembler::Exception &e) {
             std::cerr <<"assembly failed at " <<StringUtility::addrToString(e.insn->get_address())
-                      <<": " <<e.mesg <<std::endl;
+                      <<": " <<e.what() <<std::endl;
             if (!assembler->get_debug()) {
                 assembler->set_debug(stderr);
                 try {

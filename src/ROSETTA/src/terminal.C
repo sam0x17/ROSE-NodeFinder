@@ -25,6 +25,16 @@ const std::vector<Terminal*>& SubclassListBuilder::getList() const {
   return children;
 }
 
+bool
+Terminal::isInnerNode() {
+  return subclasses.size()>0;
+}
+
+bool
+Terminal::isLeafNode() {
+  return subclasses.size()==0;
+}
+
 Terminal::~Terminal()
    {
    }
@@ -47,6 +57,8 @@ Terminal::Terminal ( const string& lexemeString , Grammar & X , const string& st
      associatedGrammar(&X)
    {
      for (size_t i = 0; i < subclasses.size(); ++i) {
+       // If the next assertion fails, it's probably because you have an IR type that appears in more than one
+       // NEW_NONTERMINAL_MACRO() [Robb P. Matzke 2014-05-07]
        ROSE_ASSERT (subclasses[i]->getBaseClass() == NULL);
        ROSE_ASSERT (subclasses[i]);
        subclasses[i]->setBaseClass(this);
@@ -60,6 +72,33 @@ Terminal::setBaseClass(Terminal* bc) {baseClass = bc;}
 
 Terminal*
 Terminal::getBaseClass() const {return baseClass;}
+
+bool
+Terminal::isDerivedFrom(const string & s) const 
+   {
+  // DQ (10/11/2014): This function checks if the input name is a base class of this Terminal.
+
+#if 1
+      printf ("In Terminal::isBaseClass(): s = %s this = %p = %s \n",s.c_str(),this,this->getName().c_str());
+#endif
+
+     bool returnValue = false;
+     Terminal* temp = const_cast<Terminal*>(this);
+     while (temp != NULL && temp->getName() != s)
+        {
+          temp = temp->getBaseClass();
+        }
+
+     if (temp != NULL && temp->getName() == s)
+        {
+#if 1
+          printf ("Found matching terminal name: s = %s \n",s.c_str());
+#endif
+          returnValue = true;
+        }
+
+     return returnValue;
+   }
 
 void
 Terminal::setCanHaveInstances(bool chi) {canHaveInstances = chi;}
@@ -542,7 +581,11 @@ Terminal::addGrammarPrefixToName()
 
   // Error Checking! Check to make sure that grammar's name does not already exist in the
   // terminal's name.  This helps make sure that elements are not represented twice!
-     ROSE_ASSERT (GrammarString::isContainedIn(name,grammarName) == false);
+     if (GrammarString::isContainedIn(name, grammarName)) {
+         std::cerr <<"Grammar's name already exists in the terminal's name"
+                   <<"; name=" <<name <<", grammarName=" <<grammarName <<"\n";
+     }
+     ROSE_ASSERT(!GrammarString::isContainedIn(name,grammarName));
 
   // Set the name to include the grammar's prefix
   // Modify this statement to avoid Insure++ warning
@@ -2163,3 +2206,60 @@ Terminal::buildChildIndex()
 
      return s;
    }
+
+
+  // DQ (10/12/2014): output the name assocauted with the TypeEvaluation enum values.
+string
+Terminal::typeEvaluationName ( TypeEvaluation x )
+   {
+     string s;
+
+     switch (x)
+        {
+          case CHAR_POINTER:                               s = "CHAR_POINTER"; break;
+          case CONST_CHAR_POINTER:                         s = "CHAR_POINTER"; break;
+          case ATTACHEDPREPROCESSINGINFOTYPE:              s = "ATTACHEDPREPROCESSINGINFOTYPE"; break;
+          case ROSE_HASH_MULTIMAP:                         s = "ROSE_HASH_MULTIMAP";       break;
+          case ROSE_GRAPH_HASH_MULTIMAP:                   s = "ROSE_GRAPH_HASH_MULTIMAP"; break;
+          case ROSE_GRAPH_DIRECTED_EDGE_HASH_MULTIMAP:     s = "ROSE_GRAPH_DIRECTED_EDGE_HASH_MULTIMAP";   break;
+          case ROSE_GRAPH_UNDIRECTED_EDGE_HASH_MULTIMAP:   s = "ROSE_GRAPH_UNDIRECTED_EDGE_HASH_MULTIMAP"; break;
+          case ROSE_GRAPH_NODE_EDGE_HASH_MULTIMAP:         s = "ROSE_GRAPH_NODE_EDGE_HASH_MULTIMAP"; break;
+          case ROSE_GRAPH_INTEGER_NODE_HASH_MAP:           s = "ROSE_GRAPH_INTEGER_NODE_HASH_MAP";   break;
+          case ROSE_GRAPH_INTEGER_EDGE_HASH_MAP:           s = "ROSE_GRAPH_INTEGER_EDGE_HASH_MAP";   break;
+          case ROSE_GRAPH_STRING_INTEGER_HASH_MULTIMAP:    s = "ROSE_GRAPH_STRING_INTEGER_HASH_MULTIMAP";    break;
+          case ROSE_GRAPH_INTEGER_PAIR_EDGE_HASH_MULTIMAP: s = "ROSE_GRAPH_INTEGER_PAIR_EDGE_HASH_MULTIMAP"; break;
+          case ROSE_GRAPH_INTEGER_EDGE_HASH_MULTIMAP:      s = "ROSE_GRAPH_INTEGER_EDGE_HASH_MULTIMAP";      break;
+          case SGCLASS_POINTER:                            s = "SGCLASS_POINTER";             break;
+          case ROSEATTRUBUTESLISTCONTAINER:                s = "ROSEATTRUBUTESLISTCONTAINER"; break;
+          case SGCLASS_POINTER_LIST:                       s = "SGCLASS_POINTER_LIST";   break;
+          case SGCLASS_POINTER_VECTOR:                     s = "SGCLASS_POINTER_VECTOR"; break;
+          case SGCLASS_POINTER_VECTOR_NAMED_LIST:          s = "SGCLASS_POINTER_VECTOR_NAMED_LIST"; break;
+          case STL_CONTAINER:                              s = "STL_CONTAINER"; break;
+          case STL_SET:                                    s = "STL_SET";       break;
+       // DQ (4/30/2009): Added case of STL_MULTIMAP
+          case STL_MULTIMAP:                               s = "STL_MULTIMAP";  break;
+          case STL_MAP:                                    s = "STL_MAP";       break;
+          case STRING:                                     s = "STRING";        break;
+          case SGNAME:                                     s = "SGNAME";        break;
+          case BIT_VECTOR:                                 s = "BIT_VECTOR";    break;
+          case MODIFIERCLASS:                              s = "MODIFIERCLASS"; break;
+          case MODIFIERCLASS_WITHOUTEASYSTORAGE:           s = "MODIFIERCLASS_WITHOUTEASYSTORAGE"; break;
+          case ASTATTRIBUTEMECHANISM:                      s = "ASTATTRIBUTEMECHANISM"; break;
+          case TO_HANDLE:                                  s = "TO_HANDLE";       break;
+          case OSTREAM:                                    s = "OSTREAM";         break;
+          case ENUM_TYPE:                                  s = "ENUM_TYPE";       break;
+          case BASIC_DATA_TYPE:                            s = "BASIC_DATA_TYPE"; break;
+          case SKIP_TYPE:                                  s = "SKIP_TYPE";       break;
+       // should be no longer necessary after the implementation is changed to STL lists instead of pointers to lists
+          case SGCLASS_POINTER_LIST_POINTER:               s = "SGCLASS_POINTER_LIST_POINTER"; break;
+
+          default:
+             {
+               printf ("Default reached in switch: x = %d \n",(int)x);
+               ROSE_ASSERT(false);
+             }
+        }
+
+     return s;
+   }
+

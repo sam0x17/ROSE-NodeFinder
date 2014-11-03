@@ -28,8 +28,7 @@ libroseutil_la_SOURCES =			\
 	compilationFileDatabase.C		\
 	processSupport.C			\
 	rose_getline.C				\
-	rose_strtoull.C				\
-	Stopwatch.C
+	rose_strtoull.C
 nodist_libroseutil_la_SOURCES = rose_paths.C
 libroseutil_la_LIBADD = \
 	stringSupport/libRoseStringSupport.la \
@@ -43,20 +42,79 @@ libroseutil_la_LIBADD = \
 # DQ (4/5/2009): Added rose_paths.C to clean rule, instead of to the DISTCLEANFILES
 # DISTCLEANFILES = rose_paths.C
 
-include_HEADERS =				\
+pkginclude_HEADERS =				\
 	compilationFileDatabase.h		\
 	FormatRestorer.h			\
+	GraphUtility.h				\
 	Map.h					\
 	ParallelSort.h                          \
 	processSupport.h			\
 	rose_getline.h				\
+	rose_override.h				\
 	rose_paths.h				\
 	rose_strtoull.h				\
 	roseTraceLib.c				\
-	setup.h					\
-	Stopwatch.h
+	setup.h
 
 EXTRA_DIST = CMakeLists.txt setup.h utilDocumentation.docs
+
+########################################################################################################################
+# rules for the sawyer subdirectory
+
+noinst_LTLIBRARIES += libroseSawyer.la
+libroseSawyer_la_SOURCES =			\
+	sawyer/Assert.C				\
+	sawyer/CommandLine.C			\
+	sawyer/GraphTraversal.C			\
+	sawyer/Markup.C				\
+	sawyer/MarkupPod.C			\
+	sawyer/Message.C			\
+	sawyer/ProgressBar.C			\
+	sawyer/Sawyer.C				\
+	sawyer/SmallObject.C			\
+	sawyer/Stopwatch.C			\
+	sawyer/useHeaders.C
+nobase_pkginclude_HEADERS   =			\
+	sawyer/Access.h				\
+	sawyer/AddressMap.h			\
+	sawyer/AddressSegment.h			\
+	sawyer/AllocatingBuffer.h		\
+	sawyer/Assert.h				\
+	sawyer/BitVector.h			\
+	sawyer/BitVectorSupport.h		\
+	sawyer/Buffer.h				\
+	sawyer/Cached.h				\
+	sawyer/Callbacks.h			\
+	sawyer/CommandLine.h			\
+	sawyer/DefaultAllocator.h		\
+	sawyer/Graph.h				\
+	sawyer/GraphBoost.h			\
+	sawyer/GraphTraversal.h			\
+	sawyer/IndexedList.h			\
+	sawyer/Interval.h			\
+	sawyer/IntervalMap.h			\
+	sawyer/IntervalSet.h			\
+	sawyer/Map.h				\
+	sawyer/MappedBuffer.h			\
+	sawyer/Markup.h				\
+	sawyer/MarkupPod.h			\
+	sawyer/Message.h			\
+	sawyer/NullBuffer.h			\
+	sawyer/Optional.h			\
+	sawyer/PoolAllocator.h			\
+	sawyer/ProgressBar.h			\
+	sawyer/Sawyer.h				\
+	sawyer/SharedPointer.h			\
+	sawyer/SmallObject.h			\
+	sawyer/Stack.h				\
+	sawyer/StaticBuffer.h			\
+	sawyer/Stopwatch.h			\
+	sawyer/WarningsOff.h			\
+	sawyer/WarningsRestore.h
+EXTRA_DIST += sawyer/CMakeLists.txt
+
+########################################################################################################################
+# automake boilerplate
 
 # DQ (4/5/2009): Added rose_paths.C to clean rule, instead of to the DISTCLEANFILES
 clean-local:
@@ -64,11 +122,3 @@ clean-local:
 
 distclean-local:
 	rm -rf Templates.DB
-
-
-
-
-
-
-
-

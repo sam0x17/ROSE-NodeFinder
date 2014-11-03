@@ -4,6 +4,7 @@
 #include "BaseSemantics2.h"
 #include "threadSupport.h"
 
+namespace rose {
 namespace BinaryAnalysis {                      // documented elsewhere
 namespace InstructionSemantics2 {               // documented elsewhere
 
@@ -32,7 +33,7 @@ namespace InstructionSemantics2 {               // documented elsewhere
  *  Symbolic@0x28470a0 insn@0x080480a0[0]: signExtend(16[8], 32) = 16[32]
  *  Symbolic@0x28470a0 insn@0x080480a0[0]: add(v3284[32], 16[32]) = (add[32] v3284[32] 16[32])
  *  Symbolic@0x28470a0 insn@0x080480a0[0]: boolean_(1) = 1[1]
- *  Symbolic@0x28470a0 insn@0x080480a0[0]: readMemory(ss, (add[32] v3284[32] 16[32]), 1[1], 8) = v3285[8]
+ *  Symbolic@0x28470a0 insn@0x080480a0[0]: readMemory(ss, (add[32] v3284[32] 16[32]), v3286[8], 1[1]) = v3285[8]
  *  Symbolic@0x28470a0 insn@0x080480a0[0]: writeRegister(al, v3285[8])
  *  Symbolic@0x28470a0 insn@0x080480a0[0]: finishInstruction(mov    al, BYTE PTR ss:[ebp + 0x10])
  * @endcode
@@ -68,7 +69,7 @@ protected:
         LinePrefix(): cur_insn(NULL), ninsns(0) {}
         void set_ops(const BaseSemantics::RiscOperatorsPtr &ops) { this->ops = ops; }
         void set_insn(SgAsmInstruction *insn);
-        virtual void operator()(FILE*) /*override*/;
+        virtual void operator()(FILE*) ROSE_OVERRIDE;
     };
 
     BaseSemantics::RiscOperatorsPtr subdomain;          // Domain to which all our RISC operators chain
@@ -123,7 +124,7 @@ public:
     /** Instantiate a new RiscOperators object. The @p subdomain argument should be the RISC operators that we want to
      * trace. */
     static RiscOperatorsPtr instance(const BaseSemantics::RiscOperatorsPtr &subdomain) {
-        assert(subdomain!=NULL);
+        ASSERT_not_null(subdomain);
         RiscOperatorsPtr self = subdomain->get_state()!=NULL ?
                                 RiscOperatorsPtr(new RiscOperators(subdomain->get_state(), subdomain->get_solver())) :
                                 RiscOperatorsPtr(new RiscOperators(subdomain->get_protoval(), subdomain->get_solver()));
@@ -136,12 +137,12 @@ public:
     // Virtual constructors
 public:
     virtual BaseSemantics::RiscOperatorsPtr create(const BaseSemantics::SValuePtr &protoval,
-                                                   SMTSolver *solver=NULL) const /*override*/ {
+                                                   SMTSolver *solver=NULL) const ROSE_OVERRIDE {
         return instance(protoval, solver);
     }
 
     virtual BaseSemantics::RiscOperatorsPtr create(const BaseSemantics::StatePtr &state,
-                                                   SMTSolver *solver=NULL) const /*override*/ {
+                                                   SMTSolver *solver=NULL) const ROSE_OVERRIDE {
         return instance(state, solver);
     }
 
@@ -157,7 +158,7 @@ public:
      *  will fail if @p from does not point to a TraceSemantics::RiscOperators object. */
     static RiscOperatorsPtr promote(const BaseSemantics::RiscOperatorsPtr &x) {
         RiscOperatorsPtr retval = boost::dynamic_pointer_cast<RiscOperators>(x);
-        assert(retval!=NULL);
+        ASSERT_not_null(retval);
         return retval;
     }
     
@@ -221,28 +222,28 @@ protected:
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Methods we override from our super class
 public:
-    virtual BaseSemantics::SValuePtr get_protoval() const /*override*/;
-    virtual void set_solver(SMTSolver*) /*override*/;
-    virtual SMTSolver *get_solver() const /*override*/;
-    virtual BaseSemantics::StatePtr get_state() /*override*/;
-    virtual void set_state(const BaseSemantics::StatePtr&) /*override*/;
-    virtual void print(std::ostream&, BaseSemantics::Formatter&) const /*override*/;
-    virtual size_t get_ninsns() const /*override*/;
-    virtual void set_ninsns(size_t n) /*override*/;
-    virtual SgAsmInstruction *get_insn() const /*override*/;
-    virtual void startInstruction(SgAsmInstruction*) /*override*/;
-    virtual void finishInstruction(SgAsmInstruction*) /*override*/;
+    virtual BaseSemantics::SValuePtr get_protoval() const ROSE_OVERRIDE;
+    virtual void set_solver(SMTSolver*) ROSE_OVERRIDE;
+    virtual SMTSolver *get_solver() const ROSE_OVERRIDE;
+    virtual BaseSemantics::StatePtr get_state() const ROSE_OVERRIDE;
+    virtual void set_state(const BaseSemantics::StatePtr&) ROSE_OVERRIDE;
+    virtual void print(std::ostream&, BaseSemantics::Formatter&) const ROSE_OVERRIDE;
+    virtual size_t get_ninsns() const ROSE_OVERRIDE;
+    virtual void set_ninsns(size_t n) ROSE_OVERRIDE;
+    virtual SgAsmInstruction *get_insn() const ROSE_OVERRIDE;
+    virtual void startInstruction(SgAsmInstruction*) ROSE_OVERRIDE;
+    virtual void finishInstruction(SgAsmInstruction*) ROSE_OVERRIDE;
     
-    virtual BaseSemantics::SValuePtr undefined_(size_t nbits) /*override*/;
-    virtual BaseSemantics::SValuePtr number_(size_t nbits, uint64_t value) /*override*/;
-    virtual BaseSemantics::SValuePtr boolean_(bool value) /*override*/;
+    virtual BaseSemantics::SValuePtr undefined_(size_t nbits) ROSE_OVERRIDE;
+    virtual BaseSemantics::SValuePtr number_(size_t nbits, uint64_t value) ROSE_OVERRIDE;
+    virtual BaseSemantics::SValuePtr boolean_(bool value) ROSE_OVERRIDE;
 
-    virtual BaseSemantics::SValuePtr filterCallTarget(const BaseSemantics::SValuePtr&) /*override*/;
-    virtual BaseSemantics::SValuePtr filterReturnTarget(const BaseSemantics::SValuePtr&) /*override*/;
-    virtual BaseSemantics::SValuePtr filterIndirectJumpTarget(const BaseSemantics::SValuePtr&) /*override*/;
-    virtual void hlt() /*override*/;
-    virtual void cpuid() /*override*/;
-    virtual BaseSemantics::SValuePtr rdtsc() /*override*/;
+    virtual BaseSemantics::SValuePtr filterCallTarget(const BaseSemantics::SValuePtr&) ROSE_OVERRIDE;
+    virtual BaseSemantics::SValuePtr filterReturnTarget(const BaseSemantics::SValuePtr&) ROSE_OVERRIDE;
+    virtual BaseSemantics::SValuePtr filterIndirectJumpTarget(const BaseSemantics::SValuePtr&) ROSE_OVERRIDE;
+    virtual void hlt() ROSE_OVERRIDE;
+    virtual void cpuid() ROSE_OVERRIDE;
+    virtual BaseSemantics::SValuePtr rdtsc() ROSE_OVERRIDE;
 
     // The actual RISC operators. These are pure virtual in the base class
     virtual BaseSemantics::SValuePtr and_(const BaseSemantics::SValuePtr&, const BaseSemantics::SValuePtr&);
@@ -279,11 +280,12 @@ public:
     virtual BaseSemantics::SValuePtr readRegister(const RegisterDescriptor&);
     virtual void writeRegister(const RegisterDescriptor&, const BaseSemantics::SValuePtr&);
     virtual BaseSemantics::SValuePtr readMemory(const RegisterDescriptor &segreg, const BaseSemantics::SValuePtr &addr,
-                                                const BaseSemantics::SValuePtr&cond, size_t nbits);
+                                                const BaseSemantics::SValuePtr &dflt, const BaseSemantics::SValuePtr &cond);
     virtual void writeMemory(const RegisterDescriptor &segreg, const BaseSemantics::SValuePtr &addr,
                              const BaseSemantics::SValuePtr &data, const BaseSemantics::SValuePtr &cond);
 };
 
+} // namespace
 } // namespace
 } // namespace
 } // namespace
